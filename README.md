@@ -50,20 +50,35 @@ Or if you've built the release binary:
 
 ### Controls
 
+#### Chat Mode
 - **Type** to enter your message
 - **Enter** to send message to all active models
 - **Tab** to cycle between 1, 2, or 3 active models
 - **↑/↓** to scroll through chat history
+- **Ctrl+M** to open model selection
 - **Ctrl+C** or **q** to quit
 
-## Default Models
+#### Model Selection Mode
+- **↑/↓** to navigate through available models
+- **Space** or **Enter** to toggle model selection
+- **Ctrl+M** to return to chat
+- **Ctrl+C** or **q** to quit
 
-The application comes configured with three default models:
+## Available Models
+
+The application comes with 10 pre-configured models you can choose from:
 1. GPT-3.5 Turbo (OpenAI)
-2. Claude 3 Haiku (Anthropic)
-3. Gemini Flash 1.5 (Google)
+2. GPT-4 (OpenAI)
+3. GPT-4 Turbo (OpenAI)
+4. Claude 3 Haiku (Anthropic)
+5. Claude 3 Sonnet (Anthropic)
+6. Claude 3 Opus (Anthropic)
+7. Gemini Flash 1.5 (Google)
+8. Gemini Pro 1.5 (Google)
+9. Llama 3 70B (Meta)
+10. Mistral 7B (Mistral AI)
 
-You can modify these in `src/main.rs` by changing the model IDs and names.
+By default, the first 3 models are selected when you start the app. Use **Ctrl+M** to open the model selection screen and choose which models you want to chat with.
 
 ## Architecture
 

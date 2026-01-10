@@ -27,15 +27,25 @@ async fn main() -> Result<()> {
     // Create client
     let client = OpenRouterClient::new(api_key)?;
     
-    // Default models - users can configure these
-    let models = vec![
+    // Available models - users can choose from these
+    let available_models = vec![
         Model::new("openai/gpt-3.5-turbo", "GPT-3.5 Turbo"),
+        Model::new("openai/gpt-4", "GPT-4"),
+        Model::new("openai/gpt-4-turbo", "GPT-4 Turbo"),
         Model::new("anthropic/claude-3-haiku", "Claude 3 Haiku"),
+        Model::new("anthropic/claude-3-sonnet", "Claude 3 Sonnet"),
+        Model::new("anthropic/claude-3-opus", "Claude 3 Opus"),
         Model::new("google/gemini-flash-1.5", "Gemini Flash 1.5"),
+        Model::new("google/gemini-pro-1.5", "Gemini Pro 1.5"),
+        Model::new("meta-llama/llama-3-70b-instruct", "Llama 3 70B"),
+        Model::new("mistralai/mistral-7b-instruct", "Mistral 7B"),
     ];
     
-    let session = ChatSession::new(client, models);
-    let mut app = App::new(session);
+    // Start with first 3 models selected by default
+    let default_models = available_models.iter().take(3).cloned().collect();
+    
+    let session = ChatSession::new(client, default_models);
+    let mut app = App::new(session, available_models);
     
     // Run the app
     let res = run_app(&mut terminal, &mut app).await;
@@ -72,6 +82,12 @@ async fn run_app<B: ratatui::backend::Backend>(
                     KeyCode::Char('q') => {
                         return Ok(());
                     }
+                    KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.toggle_model_selection();
+                    }
+                    KeyCode::Char(' ') => {
+                        app.toggle_current_model();
+                    }
                     KeyCode::Char(c) => {
                         app.input_char(c);
                     }
@@ -79,13 +95,13 @@ async fn run_app<B: ratatui::backend::Backend>(
                         app.delete_char();
                     }
                     KeyCode::Enter => {
-                        app.submit_message().await?;
+                        app.handle_enter().await?;
                     }
                     KeyCode::Up => {
-                        app.scroll_up();
+                        app.handle_up();
                     }
                     KeyCode::Down => {
-                        app.scroll_down();
+                        app.handle_down();
                     }
                     KeyCode::Tab => {
                         app.cycle_model_selection();
