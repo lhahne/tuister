@@ -56,3 +56,36 @@ impl ChatSession {
         Ok(responses)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_chat_session_creation() {
+        let client = OpenRouterClient::new("test_key".to_string()).unwrap();
+        let models = vec![
+            Model::new("model1", "Model 1"),
+            Model::new("model2", "Model 2"),
+        ];
+        
+        let session = ChatSession::new(client, models.clone());
+        assert_eq!(session.models().len(), 2);
+        assert_eq!(session.messages().len(), 0);
+    }
+
+    #[test]
+    fn test_add_messages() {
+        let client = OpenRouterClient::new("test_key".to_string()).unwrap();
+        let models = vec![Model::new("model1", "Model 1")];
+        
+        let mut session = ChatSession::new(client, models);
+        
+        session.add_system_message("System prompt".to_string());
+        session.add_user_message("Hello".to_string());
+        
+        assert_eq!(session.messages().len(), 2);
+        assert_eq!(session.messages()[0].content, "System prompt");
+        assert_eq!(session.messages()[1].content, "Hello");
+    }
+}

@@ -61,3 +61,21 @@ impl OpenRouterClient {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_client_creation() {
+        let client = OpenRouterClient::new("test_api_key".to_string());
+        assert!(client.is_ok());
+    }
+
+    #[test]
+    fn test_api_key_storage() {
+        let api_key = "my_secret_key".to_string();
+        let client = OpenRouterClient::new(api_key.clone()).unwrap();
+        assert_eq!(client.api_key, api_key);
+    }
+}
