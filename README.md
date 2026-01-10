@@ -66,7 +66,20 @@ Or if you've built the release binary:
 
 ## Available Models
 
-The application comes with 10 pre-configured models you can choose from:
+The application **dynamically fetches** the complete list of available models from OpenRouter's API on startup. This ensures you always have access to the latest models without needing to update the application.
+
+### Model Discovery
+- Models are automatically fetched from OpenRouter's `/api/v1/models` endpoint
+- The list includes all models available through OpenRouter from various providers:
+  - OpenAI (GPT-3.5, GPT-4, etc.)
+  - Anthropic (Claude models)
+  - Google (Gemini models)
+  - Meta (Llama models)
+  - Mistral AI
+  - And many more...
+
+### Fallback Models
+If the API is unavailable, the app falls back to a curated list of popular models:
 1. GPT-3.5 Turbo (OpenAI)
 2. GPT-4 (OpenAI)
 3. GPT-4 Turbo (OpenAI)

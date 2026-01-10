@@ -8,7 +8,7 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
-use tuister::{ChatSession, Model, OpenRouterClient};
+use tuister::{ChatSession, OpenRouterClient};
 use ui::App;
 
 #[tokio::main]
@@ -17,6 +17,25 @@ async fn main() -> Result<()> {
     let api_key = std::env::var("OPENROUTER_API_KEY")
         .expect("OPENROUTER_API_KEY environment variable must be set");
     
+    // Create client
+    let client = OpenRouterClient::new(api_key.clone())?;
+    
+    // Fetch available models from OpenRouter API
+    let available_models = match client.fetch_models().await {
+        Ok(models) => {
+            if models.is_empty() {
+                eprintln!("Warning: No models fetched from OpenRouter. Using fallback models.");
+                get_fallback_models()
+            } else {
+                models
+            }
+        }
+        Err(e) => {
+            eprintln!("Warning: Failed to fetch models from OpenRouter: {}. Using fallback models.", e);
+            get_fallback_models()
+        }
+    };
+    
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -24,27 +43,13 @@ async fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     
-    // Create client
-    let client = OpenRouterClient::new(api_key)?;
-    
-    // Available models - users can choose from these
-    let available_models = vec![
-        Model::new("openai/gpt-3.5-turbo", "GPT-3.5 Turbo"),
-        Model::new("openai/gpt-4", "GPT-4"),
-        Model::new("openai/gpt-4-turbo", "GPT-4 Turbo"),
-        Model::new("anthropic/claude-3-haiku", "Claude 3 Haiku"),
-        Model::new("anthropic/claude-3-sonnet", "Claude 3 Sonnet"),
-        Model::new("anthropic/claude-3-opus", "Claude 3 Opus"),
-        Model::new("google/gemini-flash-1.5", "Gemini Flash 1.5"),
-        Model::new("google/gemini-pro-1.5", "Gemini Pro 1.5"),
-        Model::new("meta-llama/llama-3-70b-instruct", "Llama 3 70B"),
-        Model::new("mistralai/mistral-7b-instruct", "Mistral 7B"),
-    ];
+    // Create client for chat (reuse API key)
+    let chat_client = OpenRouterClient::new(api_key)?;
     
     // Start with first 3 models selected by default
     let default_models = available_models.iter().take(3).cloned().collect();
     
-    let session = ChatSession::new(client, default_models);
+    let session = ChatSession::new(chat_client, default_models);
     let mut app = App::new(session, available_models);
     
     // Run the app
@@ -64,6 +69,22 @@ async fn main() -> Result<()> {
     }
     
     Ok(())
+}
+
+fn get_fallback_models() -> Vec<tuister::Model> {
+    use tuister::Model;
+    vec![
+        Model::new("openai/gpt-3.5-turbo", "GPT-3.5 Turbo"),
+        Model::new("openai/gpt-4", "GPT-4"),
+        Model::new("openai/gpt-4-turbo", "GPT-4 Turbo"),
+        Model::new("anthropic/claude-3-haiku", "Claude 3 Haiku"),
+        Model::new("anthropic/claude-3-sonnet", "Claude 3 Sonnet"),
+        Model::new("anthropic/claude-3-opus", "Claude 3 Opus"),
+        Model::new("google/gemini-flash-1.5", "Gemini Flash 1.5"),
+        Model::new("google/gemini-pro-1.5", "Gemini Pro 1.5"),
+        Model::new("meta-llama/llama-3-70b-instruct", "Llama 3 70B"),
+        Model::new("mistralai/mistral-7b-instruct", "Mistral 7B"),
+    ]
 }
 
 async fn run_app<B: ratatui::backend::Backend>(

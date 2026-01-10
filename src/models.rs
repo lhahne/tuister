@@ -58,6 +58,32 @@ pub struct Choice {
     pub message: ChatMessage,
 }
 
+// OpenRouter Models API response structures
+#[derive(Debug, Deserialize)]
+pub struct ModelsResponse {
+    pub data: Vec<ModelInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ModelInfo {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub context_length: Option<u32>,
+    #[serde(default)]
+    pub pricing: Option<ModelPricing>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ModelPricing {
+    #[serde(default)]
+    pub prompt: String,
+    #[serde(default)]
+    pub completion: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

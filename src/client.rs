@@ -1,9 +1,10 @@
 use crate::error::{Result, TuisterError};
-use crate::models::{ChatMessage, ChatResponse};
+use crate::models::{ChatMessage, ChatResponse, Model, ModelsResponse};
 use reqwest::Client;
 use serde::Serialize;
 
 const OPENROUTER_API_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
+const OPENROUTER_MODELS_URL: &str = "https://openrouter.ai/api/v1/models";
 
 #[derive(Debug, Serialize)]
 struct ChatRequest {
@@ -20,6 +21,33 @@ impl OpenRouterClient {
     pub fn new(api_key: String) -> Result<Self> {
         let client = Client::new();
         Ok(Self { client, api_key })
+    }
+    
+    pub async fn fetch_models(&self) -> Result<Vec<Model>> {
+        let response = self
+            .client
+            .get(OPENROUTER_MODELS_URL)
+            .send()
+            .await?;
+        
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(TuisterError::ApiError(format!(
+                "Failed to fetch models with status {}: {}",
+                status, error_text
+            )));
+        }
+        
+        let models_response: ModelsResponse = response.json().await?;
+        
+        let models = models_response
+            .data
+            .into_iter()
+            .map(|model_info| Model::new(model_info.id, model_info.name))
+            .collect();
+        
+        Ok(models)
     }
     
     pub async fn send_message(
