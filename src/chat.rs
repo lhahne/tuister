@@ -1,6 +1,7 @@
 use crate::client::OpenRouterClient;
 use crate::error::Result;
 use crate::models::{ChatMessage, Model};
+use tokio::sync::mpsc;
 
 pub struct ChatSession {
     client: OpenRouterClient,
@@ -31,6 +32,14 @@ impl ChatSession {
     
     pub fn messages(&self) -> &[ChatMessage] {
         &self.messages
+    }
+    
+    pub async fn send_to_model_streaming(
+        &mut self,
+        model: &Model,
+        tx: mpsc::UnboundedSender<String>,
+    ) -> Result<()> {
+        self.client.send_message_streaming(&model.id, &self.messages, tx).await
     }
     
     pub async fn send_to_model(&mut self, model: &Model) -> Result<String> {

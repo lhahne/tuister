@@ -84,6 +84,28 @@ pub struct ModelPricing {
     pub completion: String,
 }
 
+// Streaming response structures
+#[derive(Debug, Deserialize)]
+pub struct StreamResponse {
+    pub id: String,
+    pub choices: Vec<StreamChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StreamChoice {
+    pub delta: StreamDelta,
+    #[serde(default)]
+    pub finish_reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StreamDelta {
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub role: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

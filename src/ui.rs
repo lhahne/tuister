@@ -6,6 +6,7 @@ use ratatui::{
     Frame,
 };
 use tuister::{ChatSession, Model, OpenRouterClient, Role};
+use tokio::sync::mpsc;
 
 #[derive(Debug, PartialEq)]
 enum AppMode {
@@ -220,23 +221,44 @@ impl App {
         // Get active models
         let active_models = self.session.models().to_vec();
         
-        // Send to each active model
+        // Send to each active model with streaming
         for model in active_models {
-            match self.session.send_to_model(&model).await {
-                Ok(response) => {
-                    self.messages.push(DisplayMessage {
-                        role: Role::Assistant,
-                        content: response,
-                        model_name: Some(model.name.clone()),
-                    });
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            let model_name = model.name.clone();
+            
+            // Start streaming in background
+            let send_task = self.session.send_to_model_streaming(&model, tx);
+            
+            // Collect streamed chunks while they arrive
+            let mut full_response = String::new();
+            
+            tokio::select! {
+                result = send_task => {
+                    // Streaming completed
+                    if let Err(e) = result {
+                        // If streaming failed, show error
+                        self.messages.push(DisplayMessage {
+                            role: Role::Assistant,
+                            content: format!("Streaming error: {}", e),
+                            model_name: Some(model_name.clone()),
+                        });
+                        continue;
+                    }
                 }
-                Err(e) => {
-                    self.messages.push(DisplayMessage {
-                        role: Role::Assistant,
-                        content: format!("Error: {}", e),
-                        model_name: Some(model.name.clone()),
-                    });
-                }
+                _ = async {
+                    while let Some(chunk) = rx.recv().await {
+                        full_response.push_str(&chunk);
+                    }
+                } => {}
+            }
+            
+            // Add complete message
+            if !full_response.is_empty() {
+                self.messages.push(DisplayMessage {
+                    role: Role::Assistant,
+                    content: full_response,
+                    model_name: Some(model_name),
+                });
             }
         }
         
