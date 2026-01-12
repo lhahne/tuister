@@ -104,8 +104,8 @@ async fn run_app<B: ratatui::backend::Backend>(
                     return Ok(());
                 }
                 
-                // Handle Ctrl+M to toggle model selection from any mode
-                if key.code == KeyCode::Char('m') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                // Handle Escape to toggle model selection from any mode
+                if key.code == KeyCode::Esc {
                     app.toggle_model_selection();
                     continue;
                 }

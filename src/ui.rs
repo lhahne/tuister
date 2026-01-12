@@ -37,8 +37,8 @@ struct DisplayMessage {
 
 impl App {
     pub fn new(session: ChatSession, available_models: Vec<Model>) -> Self {
-        let num_models = session.models().len();
-        let active_models = vec![true; num_models.min(3)];
+        let num_models = available_models.len();
+        let active_models: Vec<bool> = (0..num_models).map(|i| i < 3).collect();
         
         Self {
             session,
@@ -357,7 +357,7 @@ fn render_model_selection_mode(f: &mut Frame, app: &App) {
     f.render_widget(list, chunks[1]);
     
     // Help text
-    let help_text = "Ctrl+M: Back to chat | Space/Enter: Toggle model | ↑↓: Navigate | Ctrl+C: Quit";
+    let help_text = "Esc: Back to chat | Space/Enter: Toggle model | ↑↓: Navigate | Ctrl+C: Quit";
     let help = Paragraph::new(help_text)
         .style(Style::default())
         .block(Block::default().borders(Borders::ALL).title("Help"));
@@ -383,7 +383,7 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         ));
     }
     
-    model_spans.push(Span::raw("(Tab: cycle | Ctrl+M: select models)"));
+    model_spans.push(Span::raw("(Tab: cycle | Esc: select models)"));
     
     let header = Paragraph::new(Line::from(model_spans))
         .block(Block::default().borders(Borders::ALL).title("Active Models"));
