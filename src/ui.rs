@@ -15,6 +15,8 @@ enum AppMode {
     ModelSelection,
 }
 
+const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
 pub struct App {
     session: ChatSession,
     input: String,
@@ -26,6 +28,14 @@ pub struct App {
     mode: AppMode,
     available_models: Vec<Model>,
     selected_model_index: usize,
+    // Streaming state
+    streaming_receivers: Vec<(String, mpsc::UnboundedReceiver<String>)>,
+    streaming_buffers: HashMap<String, String>, // accumulates chunks per model
+    // Message queue for messages submitted while streaming
+    message_queue: Vec<String>,
+    // Spinner animation
+    spinner_frame: usize,
+    last_spinner_update: std::time::Instant,
 }
 
 #[derive(Clone)]
@@ -51,6 +61,11 @@ impl App {
             mode: AppMode::Chat,
             available_models,
             selected_model_index: 0,
+            streaming_receivers: Vec::new(),
+            streaming_buffers: HashMap::new(),
+            message_queue: Vec::new(),
+            spinner_frame: 0,
+            last_spinner_update: std::time::Instant::now(),
         }
     }
     
@@ -101,12 +116,11 @@ impl App {
         }
     }
     
-    pub async fn handle_enter(&mut self) -> anyhow::Result<()> {
+    pub fn handle_enter(&mut self) {
         match self.mode {
-            AppMode::Chat => self.submit_message().await,
+            AppMode::Chat => self.submit_message(),
             AppMode::ModelSelection => {
                 self.toggle_current_model();
-                Ok(())
             }
         }
     }
@@ -205,77 +219,122 @@ impl App {
         }
     }
     
-    pub async fn submit_message(&mut self) -> anyhow::Result<()> {
+    pub fn submit_message(&mut self) {
         if self.input.trim().is_empty() {
-            return Ok(());
+            return;
         }
-        
+
         let user_message = self.input.clone();
-        
-        // Clear input immediately
         self.input.clear();
-        
-        // Show loading indicator
+
+        // If already streaming, queue the message for later
+        if self.is_loading {
+            self.message_queue.push(user_message);
+            return;
+        }
+
+        self.start_streaming(user_message);
+    }
+
+    fn start_streaming(&mut self, user_message: String) {
         self.is_loading = true;
-        
+
         // Add user message to display
         self.messages.push(DisplayMessage {
             role: Role::User,
             content: user_message.clone(),
             model_name: None,
         });
-        
+
         // Add user message to session
         self.session.add_user_message(user_message);
-        
-        // Get active models
+
+        // Get active models and spawn streaming tasks
         let active_models = self.session.models().to_vec();
-        
-        // Send to each active model with streaming
+
         for model in active_models {
-            let (tx, mut rx) = mpsc::unbounded_channel();
             let model_name = model.name.clone();
-            
-            // Start streaming in background
-            let send_task = self.session.send_to_model_streaming(&model, tx);
-            
-            // Collect streamed chunks while they arrive
-            let mut full_response = String::new();
-            
-            tokio::select! {
-                result = send_task => {
-                    // Streaming completed
-                    if let Err(e) = result {
-                        // If streaming failed, show error
-                        full_response = format!("Error: {}", e);
+            let rx = self.session.spawn_streaming(&model);
+            self.streaming_receivers.push((model_name.clone(), rx));
+            self.streaming_buffers.insert(model_name, String::new());
+        }
+    }
+
+    /// Poll streaming receivers for new chunks (non-blocking)
+    pub fn poll_streaming(&mut self) {
+        // Update spinner animation (every 80ms)
+        if self.last_spinner_update.elapsed() >= std::time::Duration::from_millis(80) {
+            self.spinner_frame = (self.spinner_frame + 1) % SPINNER_FRAMES.len();
+            self.last_spinner_update = std::time::Instant::now();
+        }
+
+        if self.streaming_receivers.is_empty() {
+            return;
+        }
+
+        let mut completed = Vec::new();
+
+        for (i, (model_name, rx)) in self.streaming_receivers.iter_mut().enumerate() {
+            loop {
+                match rx.try_recv() {
+                    Ok(chunk) => {
+                        // Append chunk to buffer
+                        if let Some(buffer) = self.streaming_buffers.get_mut(model_name) {
+                            buffer.push_str(&chunk);
+                        }
+                    }
+                    Err(mpsc::error::TryRecvError::Empty) => {
+                        // No more chunks available right now
+                        break;
+                    }
+                    Err(mpsc::error::TryRecvError::Disconnected) => {
+                        // Streaming finished for this model
+                        completed.push(i);
+                        break;
                     }
                 }
-                _ = async {
-                    while let Some(chunk) = rx.recv().await {
-                        full_response.push_str(&chunk);
-                    }
-                } => {}
-            }
-            
-            // Add complete message
-            if !full_response.is_empty() {
-                self.messages.push(DisplayMessage {
-                    role: Role::Assistant,
-                    content: full_response.clone(),
-                    model_name: Some(model_name.clone()),
-                });
-                
-                // Also add to model_responses for side-by-side display
-                self.model_responses
-                    .entry(model_name)
-                    .or_default()
-                    .push(full_response);
             }
         }
-        
-        self.is_loading = false;
-        
-        Ok(())
+
+        // Remove completed receivers (in reverse order to preserve indices)
+        for i in completed.into_iter().rev() {
+            let (model_name, _) = self.streaming_receivers.remove(i);
+
+            // Move completed buffer to model_responses
+            if let Some(response) = self.streaming_buffers.remove(&model_name) {
+                if !response.is_empty() {
+                    self.messages.push(DisplayMessage {
+                        role: Role::Assistant,
+                        content: response.clone(),
+                        model_name: Some(model_name.clone()),
+                    });
+                    self.model_responses
+                        .entry(model_name)
+                        .or_default()
+                        .push(response);
+                }
+            }
+        }
+
+        // Check if all streaming is complete
+        if self.streaming_receivers.is_empty() {
+            self.is_loading = false;
+
+            // Process next queued message if any
+            if let Some(next_message) = self.message_queue.pop() {
+                self.start_streaming(next_message);
+            }
+        }
+    }
+
+    /// Check if a specific model is currently streaming
+    fn is_model_streaming(&self, model_name: &str) -> bool {
+        self.streaming_receivers.iter().any(|(name, _)| name == model_name)
+    }
+
+    /// Get the current spinner character
+    fn spinner_char(&self) -> char {
+        SPINNER_FRAMES[self.spinner_frame]
     }
 }
 
@@ -427,7 +486,9 @@ fn render_model_panes(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_model_pane(f: &mut Frame, area: Rect, app: &App, model_name: &str) {
-    // Get all messages for this model
+    let is_streaming = app.is_model_streaming(model_name);
+
+    // Get all completed messages for this model
     let model_messages: Vec<_> = app
         .messages
         .iter()
@@ -439,49 +500,74 @@ fn render_model_pane(f: &mut Frame, area: Rect, app: &App, model_name: &str) {
             }
         })
         .collect();
-    
-    let content = if app.is_loading && model_messages.is_empty() {
-        "⏳ Waiting for response...".to_string()
-    } else if model_messages.is_empty() {
-        "No messages yet".to_string()
+
+    // Build content: completed messages + streaming buffer + spinner
+    let mut content = if model_messages.is_empty() {
+        String::new()
     } else {
         model_messages.join("\n\n")
     };
-    
+
+    // Add streaming buffer content if this model is streaming
+    if is_streaming {
+        if let Some(buffer) = app.streaming_buffers.get(model_name) {
+            if !buffer.is_empty() {
+                if !content.is_empty() {
+                    content.push_str("\n\n");
+                }
+                content.push_str(buffer);
+            }
+        }
+        // Add spinner
+        if !content.is_empty() {
+            content.push(' ');
+        }
+        content.push(app.spinner_char());
+    }
+
+    if content.is_empty() {
+        content = "No messages yet".to_string();
+    }
+
+    // Build title with spinner if streaming
+    let title = if is_streaming {
+        format!("{} {}", app.spinner_char(), model_name)
+    } else {
+        model_name.to_string()
+    };
+
     let paragraph = Paragraph::new(content)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(model_name)
+                .title(title)
                 .style(Style::default()),
         )
         .wrap(Wrap { trim: true })
         .style(Style::default().fg(Color::White));
-    
+
     f.render_widget(paragraph, area);
 }
 
 fn render_input(f: &mut Frame, area: Rect, app: &App) {
-    let (input_text, style) = if app.is_loading {
-        ("⏳ Waiting for responses...".to_string(), Style::default().fg(Color::Yellow))
+    // Build title with queue indicator if messages are queued
+    let title = if !app.message_queue.is_empty() {
+        format!("Input ({} queued)", app.message_queue.len())
     } else {
-        (app.input.clone(), Style::default())
+        "Input".to_string()
     };
-    
-    let input = Paragraph::new(input_text)
-        .style(style)
-        .block(Block::default().borders(Borders::ALL).title("Input (Enter to send, Ctrl+C to quit)"));
-    
+
+    let input = Paragraph::new(app.input.clone())
+        .style(Style::default())
+        .block(Block::default().borders(Borders::ALL).title(title));
+
     f.render_widget(input, area);
-    
-    // Set cursor position in input box when in chat mode and not loading
-    if app.is_in_chat_mode() && !app.is_loading {
-        // Position cursor at the end of input text
-        // Account for border (1) and current input length
+
+    // Always show cursor in chat mode
+    if app.is_in_chat_mode() {
         let cursor_x = area.x + 1 + app.input.len() as u16;
         let cursor_y = area.y + 1;
-        
-        // Make sure cursor is within bounds
+
         if cursor_x < area.x + area.width - 1 {
             f.set_cursor_position((cursor_x, cursor_y));
         }

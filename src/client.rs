@@ -16,6 +16,7 @@ struct ChatRequest {
     stream: Option<bool>,
 }
 
+#[derive(Clone)]
 pub struct OpenRouterClient {
     client: Client,
     api_key: String,

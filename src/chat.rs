@@ -41,6 +41,20 @@ impl ChatSession {
     ) -> Result<()> {
         self.client.send_message_streaming(&model.id, &self.messages, tx).await
     }
+
+    /// Spawn a streaming task in the background and return the receiver
+    pub fn spawn_streaming(&self, model: &Model) -> mpsc::UnboundedReceiver<String> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let client = self.client.clone();
+        let model_id = model.id.clone();
+        let messages = self.messages.clone();
+
+        tokio::spawn(async move {
+            let _ = client.send_message_streaming(&model_id, &messages, tx).await;
+        });
+
+        rx
+    }
     
     pub async fn send_to_model(&mut self, model: &Model) -> Result<String> {
         let response = self.client.send_message(&model.id, &self.messages).await?;

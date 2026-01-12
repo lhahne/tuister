@@ -96,20 +96,23 @@ async fn run_app<B: ratatui::backend::Backend>(
 ) -> Result<()> {
     loop {
         terminal.draw(|f| ui::ui(f, app))?;
-        
+
+        // Poll for streaming updates (non-blocking)
+        app.poll_streaming();
+
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 // Handle Ctrl+C to quit from any mode
                 if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     return Ok(());
                 }
-                
+
                 // Handle Escape to toggle model selection from any mode
                 if key.code == KeyCode::Esc {
                     app.toggle_model_selection();
                     continue;
                 }
-                
+
                 // Handle other keys based on current mode
                 match key.code {
                     KeyCode::Char(' ') => {
@@ -122,7 +125,7 @@ async fn run_app<B: ratatui::backend::Backend>(
                         app.delete_char();
                     }
                     KeyCode::Enter => {
-                        app.handle_enter().await?;
+                        app.handle_enter();
                     }
                     KeyCode::Up => {
                         app.handle_up();
