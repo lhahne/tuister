@@ -71,12 +71,12 @@ Or if you've built the release binary:
 ### Controls
 
 #### Chat Mode
-- **Type** to enter your message
+- **Type** to enter your message (cursor visible in input box)
 - **Enter** to send message to all active models
 - **Tab** to cycle between 1, 2, or 3 active models
 - **↑/↓** to scroll through chat history
 - **Ctrl+M** to open model selection
-- **Ctrl+C** or **q** to quit
+- **Ctrl+C** to quit (or **q** when input box is empty)
 
 #### Model Selection Mode
 - **↑/↓** to navigate through available models

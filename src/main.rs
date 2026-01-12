@@ -99,15 +99,26 @@ async fn run_app<B: ratatui::backend::Backend>(
         
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
+                // Handle Ctrl+C to quit from any mode
+                if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                    return Ok(());
+                }
+                
+                // Handle Ctrl+M to toggle model selection from any mode
+                if key.code == KeyCode::Char('m') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                    app.toggle_model_selection();
+                    continue;
+                }
+                
+                // Handle other keys based on current mode
                 match key.code {
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        return Ok(());
-                    }
                     KeyCode::Char('q') => {
-                        return Ok(());
-                    }
-                    KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        app.toggle_model_selection();
+                        // Only quit if not in chat mode typing
+                        if !app.is_in_chat_mode() || app.is_input_empty() {
+                            return Ok(());
+                        } else {
+                            app.input_char('q');
+                        }
                     }
                     KeyCode::Char(' ') => {
                         app.toggle_current_model();

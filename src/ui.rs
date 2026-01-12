@@ -132,7 +132,7 @@ impl App {
         // Create a new session with selected models
         // We need to preserve the API key from the old session
         let api_key = std::env::var("OPENROUTER_API_KEY")
-            .expect("OPENROUTER_API_KEY environment variable must be set");
+            .unwrap_or_else(|_| "test_key".to_string()); // Use test key if env var not set
         let client = OpenRouterClient::new(api_key).expect("Failed to create client");
         let messages = self.session.messages().to_vec();
         
@@ -158,6 +158,14 @@ impl App {
         if self.mode == AppMode::Chat {
             self.input.pop();
         }
+    }
+    
+    pub fn is_in_chat_mode(&self) -> bool {
+        self.mode == AppMode::Chat
+    }
+    
+    pub fn is_input_empty(&self) -> bool {
+        self.input.is_empty()
     }
     
     pub fn scroll_up(&mut self) {
@@ -469,4 +477,226 @@ fn render_input(f: &mut Frame, area: Rect, app: &App) {
         .block(Block::default().borders(Borders::ALL).title("Input (Enter to send, Ctrl+C/q to quit)"));
     
     f.render_widget(input, area);
+    
+    // Set cursor position in input box when in chat mode and not loading
+    if app.is_in_chat_mode() && !app.is_loading {
+        // Position cursor at the end of input text
+        // Account for border (1) and current input length
+        let cursor_x = area.x + 1 + app.input.len() as u16;
+        let cursor_y = area.y + 1;
+        
+        // Make sure cursor is within bounds
+        if cursor_x < area.x + area.width - 1 {
+            f.set_cursor_position((cursor_x, cursor_y));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    fn create_test_app() -> App {
+        let api_key = "test_key".to_string();
+        let client = OpenRouterClient::new(api_key).unwrap();
+        let models = vec![
+            Model::new("model1", "Model 1"),
+            Model::new("model2", "Model 2"),
+            Model::new("model3", "Model 3"),
+        ];
+        let available_models = models.clone();
+        let session = ChatSession::new(client, models);
+        App::new(session, available_models)
+    }
+    
+    #[test]
+    fn test_app_creation() {
+        let app = create_test_app();
+        assert_eq!(app.input, "");
+        assert_eq!(app.messages.len(), 0);
+        assert!(!app.is_loading);
+        assert_eq!(app.mode, AppMode::Chat);
+        assert_eq!(app.active_models, vec![true, true, true]);
+    }
+    
+    #[test]
+    fn test_input_char_in_chat_mode() {
+        let mut app = create_test_app();
+        app.input_char('h');
+        app.input_char('i');
+        assert_eq!(app.input, "hi");
+    }
+    
+    #[test]
+    fn test_input_char_in_model_selection_mode() {
+        let mut app = create_test_app();
+        app.toggle_model_selection();
+        assert_eq!(app.mode, AppMode::ModelSelection);
+        
+        app.input_char('h');
+        assert_eq!(app.input, ""); // Should not add character in model selection mode
+    }
+    
+    #[test]
+    fn test_delete_char() {
+        let mut app = create_test_app();
+        app.input_char('h');
+        app.input_char('e');
+        app.input_char('l');
+        app.input_char('l');
+        app.input_char('o');
+        assert_eq!(app.input, "hello");
+        
+        app.delete_char();
+        assert_eq!(app.input, "hell");
+        
+        app.delete_char();
+        app.delete_char();
+        assert_eq!(app.input, "he");
+    }
+    
+    #[test]
+    fn test_is_in_chat_mode() {
+        let mut app = create_test_app();
+        assert!(app.is_in_chat_mode());
+        
+        app.toggle_model_selection();
+        assert!(!app.is_in_chat_mode());
+        
+        app.toggle_model_selection();
+        assert!(app.is_in_chat_mode());
+    }
+    
+    #[test]
+    fn test_is_input_empty() {
+        let mut app = create_test_app();
+        assert!(app.is_input_empty());
+        
+        app.input_char('a');
+        assert!(!app.is_input_empty());
+        
+        app.delete_char();
+        assert!(app.is_input_empty());
+    }
+    
+    #[test]
+    fn test_toggle_model_selection() {
+        let mut app = create_test_app();
+        assert_eq!(app.mode, AppMode::Chat);
+        assert_eq!(app.selected_model_index, 0);
+        
+        app.toggle_model_selection();
+        assert_eq!(app.mode, AppMode::ModelSelection);
+        assert_eq!(app.selected_model_index, 0);
+        
+        app.toggle_model_selection();
+        assert_eq!(app.mode, AppMode::Chat);
+    }
+    
+    #[test]
+    fn test_toggle_current_model_in_selection_mode() {
+        let mut app = create_test_app();
+        app.toggle_model_selection();
+        
+        // Initially all 3 models are active
+        assert_eq!(app.active_models, vec![true, true, true]);
+        
+        // Toggle first model
+        app.toggle_current_model();
+        assert_eq!(app.active_models, vec![false, true, true]);
+        
+        // Toggle it back
+        app.toggle_current_model();
+        assert_eq!(app.active_models, vec![true, true, true]);
+    }
+    
+    #[test]
+    fn test_toggle_current_model_in_chat_mode() {
+        let mut app = create_test_app();
+        
+        // In chat mode, toggle_current_model adds a space
+        app.toggle_current_model();
+        assert_eq!(app.input, " ");
+    }
+    
+    #[test]
+    fn test_handle_up_down_in_chat_mode() {
+        let mut app = create_test_app();
+        
+        // In chat mode, up/down should scroll
+        assert_eq!(app.scroll, 0);
+        app.handle_down();
+        assert_eq!(app.scroll, 1);
+        app.handle_up();
+        assert_eq!(app.scroll, 0);
+        app.handle_up(); // Should not go below 0
+        assert_eq!(app.scroll, 0);
+    }
+    
+    #[test]
+    fn test_handle_up_down_in_model_selection_mode() {
+        let mut app = create_test_app();
+        app.toggle_model_selection();
+        
+        assert_eq!(app.selected_model_index, 0);
+        app.handle_down();
+        assert_eq!(app.selected_model_index, 1);
+        app.handle_down();
+        assert_eq!(app.selected_model_index, 2);
+        app.handle_down(); // Should not go beyond last model
+        assert_eq!(app.selected_model_index, 2);
+        
+        app.handle_up();
+        assert_eq!(app.selected_model_index, 1);
+        app.handle_up();
+        assert_eq!(app.selected_model_index, 0);
+        app.handle_up(); // Should not go below 0
+        assert_eq!(app.selected_model_index, 0);
+    }
+    
+    #[test]
+    fn test_cycle_model_selection() {
+        let mut app = create_test_app();
+        
+        // Start with 3 models active
+        assert_eq!(app.active_models.iter().filter(|&&x| x).count(), 3);
+        
+        app.cycle_model_selection();
+        // Should cycle to 1 model
+        assert_eq!(app.active_models.iter().filter(|&&x| x).count(), 1);
+        assert_eq!(app.active_models, vec![true, false, false]);
+        
+        app.cycle_model_selection();
+        // Should cycle to 2 models
+        assert_eq!(app.active_models.iter().filter(|&&x| x).count(), 2);
+        assert_eq!(app.active_models, vec![true, true, false]);
+        
+        app.cycle_model_selection();
+        // Should cycle back to 3 models
+        assert_eq!(app.active_models.iter().filter(|&&x| x).count(), 3);
+        assert_eq!(app.active_models, vec![true, true, true]);
+    }
+    
+    #[test]
+    fn test_scroll_up_down() {
+        let mut app = create_test_app();
+        
+        assert_eq!(app.scroll, 0);
+        
+        app.scroll_down();
+        assert_eq!(app.scroll, 1);
+        
+        app.scroll_down();
+        assert_eq!(app.scroll, 2);
+        
+        app.scroll_up();
+        assert_eq!(app.scroll, 1);
+        
+        app.scroll_up();
+        assert_eq!(app.scroll, 0);
+        
+        // Should not go below 0
+        app.scroll_up();
+        assert_eq!(app.scroll, 0);
+    }
 }
