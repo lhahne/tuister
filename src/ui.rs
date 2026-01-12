@@ -5,9 +5,9 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
-use tuister::{ChatSession, Model, OpenRouterClient, Role};
-use tokio::sync::mpsc;
 use std::collections::HashMap;
+use tokio::sync::mpsc;
+use tuister::{ChatSession, Model, OpenRouterClient, Role};
 
 #[derive(Debug, PartialEq)]
 enum AppMode {
@@ -22,7 +22,6 @@ pub struct App {
     input: String,
     messages: Vec<DisplayMessage>,
     model_responses: HashMap<String, Vec<String>>, // model_name -> responses
-    scroll: usize,
     active_models: Vec<bool>,
     is_loading: bool,
     mode: AppMode,
@@ -37,6 +36,10 @@ pub struct App {
     // Spinner animation
     spinner_frame: usize,
     last_spinner_update: std::time::Instant,
+    // Panel scroll state
+    panel_scrolls: HashMap<String, u16>, // model_name -> scroll offset
+    focused_panel: usize,                // index of the currently focused panel for scrolling
+    auto_scroll: HashMap<String, bool>,  // model_name -> whether auto-scroll is enabled
 }
 
 #[derive(Clone)]
@@ -50,13 +53,12 @@ impl App {
     pub fn new(session: ChatSession, available_models: Vec<Model>) -> Self {
         let num_models = available_models.len();
         let active_models: Vec<bool> = (0..num_models).map(|i| i < 3).collect();
-        
+
         Self {
             session,
             input: String::new(),
             messages: Vec::new(),
             model_responses: HashMap::new(),
-            scroll: 0,
             active_models,
             is_loading: false,
             mode: AppMode::Chat,
@@ -68,9 +70,12 @@ impl App {
             message_queue: Vec::new(),
             spinner_frame: 0,
             last_spinner_update: std::time::Instant::now(),
+            panel_scrolls: HashMap::new(),
+            focused_panel: 0,
+            auto_scroll: HashMap::new(),
         }
     }
-    
+
     pub fn toggle_model_selection(&mut self) {
         match self.mode {
             AppMode::Chat => {
@@ -83,11 +88,11 @@ impl App {
             }
         }
     }
-    
+
     pub fn toggle_current_model(&mut self) {
         if self.mode == AppMode::ModelSelection {
             if self.selected_model_index < self.active_models.len() {
-                self.active_models[self.selected_model_index] = 
+                self.active_models[self.selected_model_index] =
                     !self.active_models[self.selected_model_index];
             }
         } else {
@@ -95,7 +100,7 @@ impl App {
             self.input.push(' ');
         }
     }
-    
+
     pub fn handle_up(&mut self) {
         match self.mode {
             AppMode::Chat => self.scroll_up(),
@@ -143,7 +148,7 @@ impl App {
             self.selected_model_index = (self.selected_model_index + page_size).min(max_index);
         }
     }
-    
+
     pub fn handle_enter(&mut self) {
         match self.mode {
             AppMode::Chat => self.submit_message(),
@@ -152,7 +157,7 @@ impl App {
             }
         }
     }
-    
+
     fn update_session_models(&mut self) {
         // Get the selected models
         let selected_models: Vec<Model> = self
@@ -162,7 +167,7 @@ impl App {
             .filter(|(i, _)| *i < self.active_models.len() && self.active_models[*i])
             .map(|(_, m)| m.clone())
             .collect();
-        
+
         if selected_models.is_empty() {
             // Ensure at least one model is selected
             if !self.available_models.is_empty() {
@@ -170,16 +175,16 @@ impl App {
                 return;
             }
         }
-        
+
         // Create a new session with selected models
         // We need to preserve the API key from the old session
-        let api_key = std::env::var("OPENROUTER_API_KEY")
-            .unwrap_or_else(|_| "test_key".to_string()); // Use test key if env var not set
+        let api_key =
+            std::env::var("OPENROUTER_API_KEY").unwrap_or_else(|_| "test_key".to_string()); // Use test key if env var not set
         let client = OpenRouterClient::new(api_key).expect("Failed to create client");
         let messages = self.session.messages().to_vec();
-        
+
         self.session = ChatSession::new(client, selected_models);
-        
+
         // Restore message history
         for msg in messages {
             match msg.role {
@@ -189,40 +194,105 @@ impl App {
             }
         }
     }
-    
+
     pub fn input_char(&mut self, c: char) {
         if self.mode == AppMode::Chat {
             self.input.push(c);
         }
     }
-    
+
     pub fn delete_char(&mut self) {
         if self.mode == AppMode::Chat {
             self.input.pop();
         }
     }
-    
+
     pub fn is_in_chat_mode(&self) -> bool {
         self.mode == AppMode::Chat
     }
-    
+
     pub fn scroll_up(&mut self) {
-        if self.scroll > 0 {
-            self.scroll -= 1;
+        if let Some(model_name) = self.get_focused_model_name() {
+            let scroll = self.panel_scrolls.entry(model_name.clone()).or_insert(0);
+            if *scroll > 0 {
+                *scroll -= 1;
+            }
+            // Disable auto-scroll when manually scrolling
+            self.auto_scroll.insert(model_name, false);
         }
     }
-    
+
     pub fn scroll_down(&mut self) {
-        self.scroll += 1;
+        if let Some(model_name) = self.get_focused_model_name() {
+            let scroll = self.panel_scrolls.entry(model_name.clone()).or_insert(0);
+            *scroll += 1;
+            // Disable auto-scroll when manually scrolling down
+            // (user might be scrolling to catch up, re-enable if at bottom)
+            self.auto_scroll.insert(model_name, false);
+        }
     }
-    
+
+    /// Cycle focus to the next panel (left/right navigation)
+    pub fn cycle_panel_focus_right(&mut self) {
+        if self.mode == AppMode::Chat {
+            let num_active = self.get_active_model_names().len();
+            if num_active > 0 {
+                self.focused_panel = (self.focused_panel + 1) % num_active;
+            }
+        }
+    }
+
+    pub fn cycle_panel_focus_left(&mut self) {
+        if self.mode == AppMode::Chat {
+            let num_active = self.get_active_model_names().len();
+            if num_active > 0 {
+                if self.focused_panel == 0 {
+                    self.focused_panel = num_active - 1;
+                } else {
+                    self.focused_panel -= 1;
+                }
+            }
+        }
+    }
+
+    /// Get the model name of the currently focused panel
+    fn get_focused_model_name(&self) -> Option<String> {
+        let active_names = self.get_active_model_names();
+        active_names.get(self.focused_panel).cloned()
+    }
+
+    /// Get list of active model names in display order
+    fn get_active_model_names(&self) -> Vec<String> {
+        self.available_models
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i < self.active_models.len() && self.active_models[*i])
+            .map(|(_, m)| m.name.clone())
+            .collect()
+    }
+
+    /// Enable auto-scroll for a model (called when streaming starts)
+    fn enable_auto_scroll(&mut self, model_name: &str) {
+        self.auto_scroll.insert(model_name.to_string(), true);
+    }
+
+    /// Get scroll offset for a model panel
+    pub fn get_panel_scroll(&self, model_name: &str) -> u16 {
+        *self.panel_scrolls.get(model_name).unwrap_or(&0)
+    }
+
+    /// Check if a panel is the focused one
+    pub fn is_panel_focused(&self, panel_index: usize) -> bool {
+        self.focused_panel == panel_index
+    }
+
     pub fn cycle_model_selection(&mut self) {
         if self.mode == AppMode::Chat {
             let num_models = self.available_models.len();
-            
+
             // Find the current number of active models
             let active_count = self.active_models.iter().filter(|&&x| x).count();
-            
+
             if active_count == 1 {
                 // Activate 2 models
                 self.active_models = vec![false; num_models];
@@ -242,11 +312,11 @@ impl App {
                     self.active_models[0] = true;
                 }
             }
-            
+
             self.update_session_models();
         }
     }
-    
+
     pub fn submit_message(&mut self) {
         if self.input.trim().is_empty() {
             return;
@@ -284,7 +354,9 @@ impl App {
             let model_name = model.name.clone();
             let rx = self.session.spawn_streaming(&model);
             self.streaming_receivers.push((model_name.clone(), rx));
-            self.streaming_buffers.insert(model_name, String::new());
+            self.streaming_buffers
+                .insert(model_name.clone(), String::new());
+            self.enable_auto_scroll(&model_name);
         }
     }
 
@@ -357,7 +429,9 @@ impl App {
 
     /// Check if a specific model is currently streaming
     fn is_model_streaming(&self, model_name: &str) -> bool {
-        self.streaming_receivers.iter().any(|(name, _)| name == model_name)
+        self.streaming_receivers
+            .iter()
+            .any(|(name, _)| name == model_name)
     }
 
     /// Get the current spinner character
@@ -377,18 +451,18 @@ fn render_chat_mode(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Header
-            Constraint::Min(1),     // Model response panes
-            Constraint::Length(3),  // Input
+            Constraint::Length(3), // Header
+            Constraint::Min(1),    // Model response panes
+            Constraint::Length(3), // Input
         ])
         .split(f.area());
-    
+
     // Header
     render_header(f, chunks[0], app);
-    
+
     // Model response panes (side by side)
     render_model_panes(f, chunks[1], app);
-    
+
     // Input
     render_input(f, chunks[2], app);
 }
@@ -453,13 +527,14 @@ fn render_model_selection_mode(f: &mut Frame, app: &App) {
     *list_state.offset_mut() = app.model_list_offset;
 
     f.render_stateful_widget(list, chunks[1], &mut list_state);
-    
+
     // Help text
-    let help_text = "Esc: Back to chat | Space/Enter: Toggle | ↑↓/PgUp/PgDn: Navigate | Ctrl+C: Quit";
+    let help_text =
+        "Esc: Back to chat | Space/Enter: Toggle | ↑↓/PgUp/PgDn: Navigate | Ctrl+C: Quit";
     let help = Paragraph::new(help_text)
         .style(Style::default())
         .block(Block::default().borders(Borders::ALL).title("Help"));
-    
+
     f.render_widget(help, chunks[2]);
 }
 
@@ -471,21 +546,28 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         .filter(|(i, _)| *i < app.active_models.len() && app.active_models[*i])
         .map(|(_, m)| m)
         .collect();
-    
+
     let mut model_spans = Vec::new();
-    
+
     for model in &active_models {
         model_spans.push(Span::styled(
             format!("[{}] ", model.name),
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         ));
     }
-    
-    model_spans.push(Span::raw("(Tab: cycle | Esc: select models)"));
-    
-    let header = Paragraph::new(Line::from(model_spans))
-        .block(Block::default().borders(Borders::ALL).title("Active Models"));
-    
+
+    model_spans.push(Span::raw(
+        "(←→: focus panel | ↑↓: scroll | Tab: cycle | Esc: models)",
+    ));
+
+    let header = Paragraph::new(Line::from(model_spans)).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Active Models"),
+    );
+
     f.render_widget(header, area);
 }
 
@@ -498,7 +580,7 @@ fn render_model_panes(f: &mut Frame, area: Rect, app: &App) {
         .filter(|(i, _)| *i < app.active_models.len() && app.active_models[*i])
         .map(|(_, m)| m)
         .collect();
-    
+
     if active_models.is_empty() {
         let empty = Paragraph::new("No models selected")
             .block(Block::default().borders(Borders::ALL))
@@ -506,37 +588,36 @@ fn render_model_panes(f: &mut Frame, area: Rect, app: &App) {
         f.render_widget(empty, area);
         return;
     }
-    
+
     // Create horizontal layout for side-by-side panes
     let num_models = active_models.len();
     let constraints: Vec<Constraint> = (0..num_models)
         .map(|_| Constraint::Percentage(100 / num_models as u16))
         .collect();
-    
+
     let panes = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(constraints)
         .split(area);
-    
+
     // Render each model's pane
     for (idx, model) in active_models.iter().enumerate() {
-        render_model_pane(f, panes[idx], app, &model.name);
+        let is_focused = app.is_panel_focused(idx);
+        render_model_pane(f, panes[idx], app, &model.name, is_focused);
     }
 }
 
-fn render_model_pane(f: &mut Frame, area: Rect, app: &App, model_name: &str) {
+fn render_model_pane(f: &mut Frame, area: Rect, app: &App, model_name: &str, is_focused: bool) {
     let is_streaming = app.is_model_streaming(model_name);
 
     // Get all completed messages for this model
     let model_messages: Vec<_> = app
         .messages
         .iter()
-        .filter_map(|msg| {
-            match &msg.model_name {
-                Some(name) if name == model_name => Some(msg.content.clone()),
-                None if msg.role == Role::User => Some(format!("You: {}", msg.content)),
-                _ => None,
-            }
+        .filter_map(|msg| match &msg.model_name {
+            Some(name) if name == model_name => Some(msg.content.clone()),
+            None if msg.role == Role::User => Some(format!("You: {}", msg.content)),
+            _ => None,
         })
         .collect();
 
@@ -568,11 +649,59 @@ fn render_model_pane(f: &mut Frame, area: Rect, app: &App, model_name: &str) {
         content = "No messages yet".to_string();
     }
 
-    // Build title with spinner if streaming
+    // Build title with focus indicator and spinner if streaming
+    let focus_indicator = if is_focused { "► " } else { "" };
     let title = if is_streaming {
-        format!("{} {}", app.spinner_char(), model_name)
+        format!("{}{} {}", focus_indicator, app.spinner_char(), model_name)
     } else {
-        model_name.to_string()
+        format!("{}{}", focus_indicator, model_name)
+    };
+
+    // Determine border color based on focus
+    let border_style = if is_focused {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default()
+    };
+
+    // Get scroll offset for this panel
+    let scroll_offset = app.get_panel_scroll(model_name);
+
+    // Check if auto-scroll is enabled for this model
+    let should_auto_scroll = app.auto_scroll.get(model_name).copied().unwrap_or(true);
+
+    // Calculate wrapped content height for auto-scroll
+    // We need to account for text wrapping based on the panel width
+    let inner_width = area.width.saturating_sub(2) as usize; // -2 for borders
+    let visible_height = area.height.saturating_sub(2); // -2 for borders
+
+    // Count wrapped lines by calculating how many visual lines each content line takes
+    let wrapped_lines: u16 = if inner_width > 0 {
+        content
+            .lines()
+            .map(|line| {
+                let line_len = line.chars().count();
+                if line_len == 0 {
+                    1 // empty lines still take 1 line
+                } else {
+                    // Ceiling division to get number of wrapped lines
+                    ((line_len + inner_width - 1) / inner_width) as u16
+                }
+            })
+            .sum()
+    } else {
+        content.lines().count() as u16
+    };
+
+    // Determine final scroll position
+    let final_scroll = if should_auto_scroll && wrapped_lines > visible_height {
+        // Auto-scroll to bottom
+        wrapped_lines.saturating_sub(visible_height)
+    } else if should_auto_scroll {
+        // Content fits, no scroll needed
+        0
+    } else {
+        scroll_offset
     };
 
     let paragraph = Paragraph::new(content)
@@ -580,9 +709,10 @@ fn render_model_pane(f: &mut Frame, area: Rect, app: &App, model_name: &str) {
             Block::default()
                 .borders(Borders::ALL)
                 .title(title)
-                .style(Style::default()),
+                .border_style(border_style),
         )
         .wrap(Wrap { trim: true })
+        .scroll((final_scroll, 0))
         .style(Style::default().fg(Color::White));
 
     f.render_widget(paragraph, area);
@@ -616,7 +746,7 @@ fn render_input(f: &mut Frame, area: Rect, app: &App) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     fn create_test_app() -> App {
         let api_key = "test_key".to_string();
         let client = OpenRouterClient::new(api_key).unwrap();
@@ -629,7 +759,7 @@ mod tests {
         let session = ChatSession::new(client, models);
         App::new(session, available_models)
     }
-    
+
     #[test]
     fn test_app_creation() {
         let app = create_test_app();
@@ -639,7 +769,7 @@ mod tests {
         assert_eq!(app.mode, AppMode::Chat);
         assert_eq!(app.active_models, vec![true, true, true]);
     }
-    
+
     #[test]
     fn test_input_char_in_chat_mode() {
         let mut app = create_test_app();
@@ -647,17 +777,17 @@ mod tests {
         app.input_char('i');
         assert_eq!(app.input, "hi");
     }
-    
+
     #[test]
     fn test_input_char_in_model_selection_mode() {
         let mut app = create_test_app();
         app.toggle_model_selection();
         assert_eq!(app.mode, AppMode::ModelSelection);
-        
+
         app.input_char('h');
         assert_eq!(app.input, ""); // Should not add character in model selection mode
     }
-    
+
     #[test]
     fn test_delete_char() {
         let mut app = create_test_app();
@@ -667,86 +797,89 @@ mod tests {
         app.input_char('l');
         app.input_char('o');
         assert_eq!(app.input, "hello");
-        
+
         app.delete_char();
         assert_eq!(app.input, "hell");
-        
+
         app.delete_char();
         app.delete_char();
         assert_eq!(app.input, "he");
     }
-    
+
     #[test]
     fn test_is_in_chat_mode() {
         let mut app = create_test_app();
         assert!(app.is_in_chat_mode());
-        
+
         app.toggle_model_selection();
         assert!(!app.is_in_chat_mode());
-        
+
         app.toggle_model_selection();
         assert!(app.is_in_chat_mode());
     }
-    
+
     #[test]
     fn test_toggle_model_selection() {
         let mut app = create_test_app();
         assert_eq!(app.mode, AppMode::Chat);
         assert_eq!(app.selected_model_index, 0);
-        
+
         app.toggle_model_selection();
         assert_eq!(app.mode, AppMode::ModelSelection);
         assert_eq!(app.selected_model_index, 0);
-        
+
         app.toggle_model_selection();
         assert_eq!(app.mode, AppMode::Chat);
     }
-    
+
     #[test]
     fn test_toggle_current_model_in_selection_mode() {
         let mut app = create_test_app();
         app.toggle_model_selection();
-        
+
         // Initially all 3 models are active
         assert_eq!(app.active_models, vec![true, true, true]);
-        
+
         // Toggle first model
         app.toggle_current_model();
         assert_eq!(app.active_models, vec![false, true, true]);
-        
+
         // Toggle it back
         app.toggle_current_model();
         assert_eq!(app.active_models, vec![true, true, true]);
     }
-    
+
     #[test]
     fn test_toggle_current_model_in_chat_mode() {
         let mut app = create_test_app();
-        
+
         // In chat mode, toggle_current_model adds a space
         app.toggle_current_model();
         assert_eq!(app.input, " ");
     }
-    
+
     #[test]
     fn test_handle_up_down_in_chat_mode() {
         let mut app = create_test_app();
-        
-        // In chat mode, up/down should scroll
-        assert_eq!(app.scroll, 0);
+
+        // Get the focused model name (first active model)
+        let model_name = app.get_active_model_names()[0].clone();
+
+        // In chat mode, up/down should scroll the focused panel
+        assert_eq!(app.get_panel_scroll(&model_name), 0);
         app.handle_down();
-        assert_eq!(app.scroll, 1);
+        assert_eq!(app.get_panel_scroll(&model_name), 1);
         app.handle_up();
-        assert_eq!(app.scroll, 0);
+        assert_eq!(app.get_panel_scroll(&model_name), 0);
         app.handle_up(); // Should not go below 0
-        assert_eq!(app.scroll, 0);
+        assert_eq!(app.get_panel_scroll(&model_name), 0);
     }
-    
+
     #[test]
     fn test_handle_up_down_in_model_selection_mode() {
         let mut app = create_test_app();
         app.toggle_model_selection();
-        
+
         assert_eq!(app.selected_model_index, 0);
         app.handle_down();
         assert_eq!(app.selected_model_index, 1);
@@ -754,7 +887,7 @@ mod tests {
         assert_eq!(app.selected_model_index, 2);
         app.handle_down(); // Should not go beyond last model
         assert_eq!(app.selected_model_index, 2);
-        
+
         app.handle_up();
         assert_eq!(app.selected_model_index, 1);
         app.handle_up();
@@ -762,51 +895,54 @@ mod tests {
         app.handle_up(); // Should not go below 0
         assert_eq!(app.selected_model_index, 0);
     }
-    
+
     #[test]
     fn test_cycle_model_selection() {
         let mut app = create_test_app();
-        
+
         // Start with 3 models active
         assert_eq!(app.active_models.iter().filter(|&&x| x).count(), 3);
-        
+
         app.cycle_model_selection();
         // Should cycle to 1 model
         assert_eq!(app.active_models.iter().filter(|&&x| x).count(), 1);
         assert_eq!(app.active_models, vec![true, false, false]);
-        
+
         app.cycle_model_selection();
         // Should cycle to 2 models
         assert_eq!(app.active_models.iter().filter(|&&x| x).count(), 2);
         assert_eq!(app.active_models, vec![true, true, false]);
-        
+
         app.cycle_model_selection();
         // Should cycle back to 3 models
         assert_eq!(app.active_models.iter().filter(|&&x| x).count(), 3);
         assert_eq!(app.active_models, vec![true, true, true]);
     }
-    
+
     #[test]
     fn test_scroll_up_down() {
         let mut app = create_test_app();
-        
-        assert_eq!(app.scroll, 0);
-        
+
+        // Get the focused model name (first active model)
+        let model_name = app.get_active_model_names()[0].clone();
+
+        assert_eq!(app.get_panel_scroll(&model_name), 0);
+
         app.scroll_down();
-        assert_eq!(app.scroll, 1);
-        
+        assert_eq!(app.get_panel_scroll(&model_name), 1);
+
         app.scroll_down();
-        assert_eq!(app.scroll, 2);
-        
+        assert_eq!(app.get_panel_scroll(&model_name), 2);
+
         app.scroll_up();
-        assert_eq!(app.scroll, 1);
-        
+        assert_eq!(app.get_panel_scroll(&model_name), 1);
+
         app.scroll_up();
-        assert_eq!(app.scroll, 0);
-        
+        assert_eq!(app.get_panel_scroll(&model_name), 0);
+
         // Should not go below 0
         app.scroll_up();
-        assert_eq!(app.scroll, 0);
+        assert_eq!(app.get_panel_scroll(&model_name), 0);
     }
 
     #[test]

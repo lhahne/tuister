@@ -15,14 +15,14 @@ use ui::App;
 async fn main() -> Result<()> {
     // Load .env file if it exists (silently ignore if not found)
     let _ = dotenvy::dotenv();
-    
+
     // Get API key from environment
     let api_key = std::env::var("OPENROUTER_API_KEY")
         .expect("OPENROUTER_API_KEY environment variable must be set");
-    
+
     // Create client
     let client = OpenRouterClient::new(api_key.clone())?;
-    
+
     // Fetch available models from OpenRouter API
     let available_models = match client.fetch_models().await {
         Ok(models) => {
@@ -34,30 +34,33 @@ async fn main() -> Result<()> {
             }
         }
         Err(e) => {
-            eprintln!("Warning: Failed to fetch models from OpenRouter: {}. Using fallback models.", e);
+            eprintln!(
+                "Warning: Failed to fetch models from OpenRouter: {}. Using fallback models.",
+                e
+            );
             get_fallback_models()
         }
     };
-    
+
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-    
+
     // Create client for chat (reuse API key)
     let chat_client = OpenRouterClient::new(api_key)?;
-    
+
     // Start with first 3 models selected by default
     let default_models = available_models.iter().take(3).cloned().collect();
-    
+
     let session = ChatSession::new(chat_client, default_models);
     let mut app = App::new(session, available_models);
-    
+
     // Run the app
     let res = run_app(&mut terminal, &mut app).await;
-    
+
     // Restore terminal
     disable_raw_mode()?;
     execute!(
@@ -66,11 +69,11 @@ async fn main() -> Result<()> {
         DisableMouseCapture
     )?;
     terminal.show_cursor()?;
-    
+
     if let Err(err) = res {
         println!("Error: {:?}", err);
     }
-    
+
     Ok(())
 }
 
@@ -142,10 +145,15 @@ async fn run_app<B: ratatui::backend::Backend>(
                     KeyCode::Tab => {
                         app.cycle_model_selection();
                     }
+                    KeyCode::Left => {
+                        app.cycle_panel_focus_left();
+                    }
+                    KeyCode::Right => {
+                        app.cycle_panel_focus_right();
+                    }
                     _ => {}
                 }
             }
         }
     }
 }
-
