@@ -97,6 +97,9 @@ async fn run_app<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
 ) -> Result<()> {
+    // Track whether we're waiting for a second Ctrl+C to quit
+    let mut pending_quit = false;
+
     loop {
         terminal.draw(|f| ui::ui(f, app))?;
 
@@ -105,10 +108,25 @@ async fn run_app<B: ratatui::backend::Backend>(
 
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
-                // Handle Ctrl+C to quit from any mode
+                // Handle Ctrl+C: first cancels streaming, second quits
                 if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                    return Ok(());
+                    if app.is_streaming() {
+                        // First Ctrl+C while streaming: cancel the streaming
+                        app.cancel_streaming();
+                        pending_quit = false;
+                        continue;
+                    } else if pending_quit {
+                        // Second Ctrl+C: quit the app
+                        return Ok(());
+                    } else {
+                        // First Ctrl+C with no streaming: set pending quit
+                        pending_quit = true;
+                        continue;
+                    }
                 }
+
+                // Any other key resets the pending quit state
+                pending_quit = false;
 
                 // Handle Escape to toggle model selection from any mode
                 if key.code == KeyCode::Esc {

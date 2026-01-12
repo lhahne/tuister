@@ -438,6 +438,46 @@ impl App {
     fn spinner_char(&self) -> char {
         SPINNER_FRAMES[self.spinner_frame]
     }
+
+    /// Cancel any ongoing streaming and clear buffers
+    /// Returns true if there was an active streaming operation to cancel
+    /// Preserves any text that was already received/displayed
+    pub fn cancel_streaming(&mut self) -> bool {
+        let was_streaming = self.is_loading || !self.streaming_receivers.is_empty();
+
+        // Clear all streaming receivers
+        self.streaming_receivers.clear();
+
+        // Preserve any partial responses that were already displayed
+        // Move streaming buffers to messages so text remains visible
+        for (model_name, mut buffer) in self.streaming_buffers.drain() {
+            if !buffer.is_empty() {
+                buffer.push_str("\n\n[response terminated]");
+                self.messages.push(DisplayMessage {
+                    role: Role::Assistant,
+                    content: buffer.clone(),
+                    model_name: Some(model_name.clone()),
+                });
+                self.model_responses
+                    .entry(model_name)
+                    .or_default()
+                    .push(buffer);
+            }
+        }
+
+        // Clear message queue
+        self.message_queue.clear();
+
+        // Reset loading state
+        self.is_loading = false;
+
+        was_streaming
+    }
+
+    /// Check if there is any ongoing streaming activity
+    pub fn is_streaming(&self) -> bool {
+        self.is_loading || !self.streaming_receivers.is_empty()
+    }
 }
 
 pub fn ui(f: &mut Frame, app: &App) {
