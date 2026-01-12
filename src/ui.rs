@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
 use tuister::{ChatSession, Model, OpenRouterClient, Role};
@@ -28,6 +28,7 @@ pub struct App {
     mode: AppMode,
     available_models: Vec<Model>,
     selected_model_index: usize,
+    model_list_offset: usize, // scroll offset for model list
     // Streaming state
     streaming_receivers: Vec<(String, mpsc::UnboundedReceiver<String>)>,
     streaming_buffers: HashMap<String, String>, // accumulates chunks per model
@@ -61,6 +62,7 @@ impl App {
             mode: AppMode::Chat,
             available_models,
             selected_model_index: 0,
+            model_list_offset: 0,
             streaming_receivers: Vec::new(),
             streaming_buffers: HashMap::new(),
             message_queue: Vec::new(),
@@ -100,19 +102,45 @@ impl App {
             AppMode::ModelSelection => {
                 if self.selected_model_index > 0 {
                     self.selected_model_index -= 1;
+                    // Adjust offset if selected item is above visible area
+                    if self.selected_model_index < self.model_list_offset {
+                        self.model_list_offset = self.selected_model_index;
+                    }
                 }
             }
         }
     }
-    
+
     pub fn handle_down(&mut self) {
         match self.mode {
             AppMode::Chat => self.scroll_down(),
             AppMode::ModelSelection => {
                 if self.selected_model_index < self.available_models.len() - 1 {
                     self.selected_model_index += 1;
+                    // Adjust offset if selected item is below visible area
+                    // Assume visible height of ~15 items (will be adjusted by ListState if needed)
+                    let visible_height = 15;
+                    if self.selected_model_index >= self.model_list_offset + visible_height {
+                        self.model_list_offset = self.selected_model_index - visible_height + 1;
+                    }
                 }
             }
+        }
+    }
+
+    pub fn handle_page_up(&mut self) {
+        if self.mode == AppMode::ModelSelection {
+            let page_size = 10;
+            self.selected_model_index = self.selected_model_index.saturating_sub(page_size);
+            self.model_list_offset = self.model_list_offset.saturating_sub(page_size);
+        }
+    }
+
+    pub fn handle_page_down(&mut self) {
+        if self.mode == AppMode::ModelSelection {
+            let page_size = 10;
+            let max_index = self.available_models.len().saturating_sub(1);
+            self.selected_model_index = (self.selected_model_index + page_size).min(max_index);
         }
     }
     
@@ -374,13 +402,17 @@ fn render_model_selection_mode(f: &mut Frame, app: &App) {
             Constraint::Length(3),
         ])
         .split(f.area());
-    
-    // Title
-    let title = Paragraph::new("Model Selection")
-        .style(Style::default().add_modifier(Modifier::BOLD))
-        .block(Block::default().borders(Borders::ALL));
+
+    // Title with count
+    let title = Paragraph::new(format!(
+        "Model Selection ({}/{})",
+        app.selected_model_index + 1,
+        app.available_models.len()
+    ))
+    .style(Style::default().add_modifier(Modifier::BOLD))
+    .block(Block::default().borders(Borders::ALL));
     f.render_widget(title, chunks[0]);
-    
+
     // Model list
     let items: Vec<ListItem> = app
         .available_models
@@ -389,10 +421,10 @@ fn render_model_selection_mode(f: &mut Frame, app: &App) {
         .map(|(i, model)| {
             let is_selected = i < app.active_models.len() && app.active_models[i];
             let is_highlighted = i == app.selected_model_index;
-            
+
             let checkbox = if is_selected { "[✓]" } else { "[ ]" };
             let content = format!("{} {}", checkbox, model.name);
-            
+
             let style = if is_highlighted {
                 Style::default()
                     .fg(Color::Yellow)
@@ -402,21 +434,28 @@ fn render_model_selection_mode(f: &mut Frame, app: &App) {
             } else {
                 Style::default().fg(Color::DarkGray)
             };
-            
+
             ListItem::new(content).style(style)
         })
         .collect();
-    
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Available Models (↑↓ to navigate, Space/Enter to toggle)"),
-    );
-    
-    f.render_widget(list, chunks[1]);
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Available Models (↑↓/PgUp/PgDn to navigate, Space/Enter to toggle)"),
+        )
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+
+    // Use ListState for scrolling
+    let mut list_state = ListState::default();
+    list_state.select(Some(app.selected_model_index));
+    *list_state.offset_mut() = app.model_list_offset;
+
+    f.render_stateful_widget(list, chunks[1], &mut list_state);
     
     // Help text
-    let help_text = "Esc: Back to chat | Space/Enter: Toggle model | ↑↓: Navigate | Ctrl+C: Quit";
+    let help_text = "Esc: Back to chat | Space/Enter: Toggle | ↑↓/PgUp/PgDn: Navigate | Ctrl+C: Quit";
     let help = Paragraph::new(help_text)
         .style(Style::default())
         .block(Block::default().borders(Borders::ALL).title("Help"));
@@ -768,5 +807,193 @@ mod tests {
         // Should not go below 0
         app.scroll_up();
         assert_eq!(app.scroll, 0);
+    }
+
+    #[test]
+    fn test_message_queue_when_loading() {
+        let mut app = create_test_app();
+
+        // Simulate loading state
+        app.is_loading = true;
+
+        // Type and submit a message while loading
+        app.input = "queued message".to_string();
+        app.submit_message();
+
+        // Message should be queued, not sent
+        assert_eq!(app.message_queue.len(), 1);
+        assert_eq!(app.message_queue[0], "queued message");
+        assert_eq!(app.input, ""); // Input should be cleared
+    }
+
+    #[test]
+    fn test_message_queue_multiple() {
+        let mut app = create_test_app();
+        app.is_loading = true;
+
+        app.input = "first".to_string();
+        app.submit_message();
+        app.input = "second".to_string();
+        app.submit_message();
+        app.input = "third".to_string();
+        app.submit_message();
+
+        assert_eq!(app.message_queue.len(), 3);
+        assert_eq!(app.message_queue[0], "first");
+        assert_eq!(app.message_queue[1], "second");
+        assert_eq!(app.message_queue[2], "third");
+    }
+
+    #[test]
+    fn test_submit_empty_message() {
+        let mut app = create_test_app();
+
+        app.input = "   ".to_string(); // whitespace only
+        app.submit_message();
+
+        assert_eq!(app.messages.len(), 0);
+        assert!(!app.is_loading);
+    }
+
+    #[test]
+    fn test_spinner_char() {
+        let app = create_test_app();
+
+        // Default spinner frame is 0
+        assert_eq!(app.spinner_char(), '⠋');
+    }
+
+    #[test]
+    fn test_spinner_frames() {
+        let mut app = create_test_app();
+
+        // Test all spinner frames
+        let expected = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        for (i, &expected_char) in expected.iter().enumerate() {
+            app.spinner_frame = i;
+            assert_eq!(app.spinner_char(), expected_char);
+        }
+    }
+
+    #[test]
+    fn test_is_model_streaming() {
+        let mut app = create_test_app();
+
+        // Initially no models are streaming
+        assert!(!app.is_model_streaming("Model 1"));
+
+        // Add a streaming receiver
+        let (_tx, rx) = mpsc::unbounded_channel::<String>();
+        app.streaming_receivers.push(("Model 1".to_string(), rx));
+
+        assert!(app.is_model_streaming("Model 1"));
+        assert!(!app.is_model_streaming("Model 2"));
+    }
+
+    #[test]
+    fn test_handle_page_up() {
+        let mut app = create_test_app();
+        app.toggle_model_selection();
+
+        // Start at index 0
+        assert_eq!(app.selected_model_index, 0);
+
+        // Page up from 0 should stay at 0
+        app.handle_page_up();
+        assert_eq!(app.selected_model_index, 0);
+    }
+
+    #[test]
+    fn test_handle_page_down() {
+        let mut app = create_test_app();
+        app.toggle_model_selection();
+
+        // Start at index 0
+        assert_eq!(app.selected_model_index, 0);
+
+        // Page down should go to last item (only 3 models)
+        app.handle_page_down();
+        assert_eq!(app.selected_model_index, 2); // last model
+    }
+
+    #[test]
+    fn test_page_navigation_not_in_model_selection() {
+        let mut app = create_test_app();
+
+        // In chat mode, page up/down should do nothing
+        app.selected_model_index = 0;
+        app.handle_page_up();
+        assert_eq!(app.selected_model_index, 0);
+
+        app.handle_page_down();
+        assert_eq!(app.selected_model_index, 0);
+    }
+
+    #[test]
+    fn test_model_list_offset_on_down() {
+        let mut app = create_test_app();
+        app.toggle_model_selection();
+
+        // With only 3 models, offset shouldn't change much
+        assert_eq!(app.model_list_offset, 0);
+
+        app.handle_down();
+        assert_eq!(app.model_list_offset, 0); // Still visible
+
+        app.handle_down();
+        assert_eq!(app.model_list_offset, 0); // Still visible
+    }
+
+    #[test]
+    fn test_model_list_offset_on_up() {
+        let mut app = create_test_app();
+        app.toggle_model_selection();
+
+        // Set offset and selected index
+        app.model_list_offset = 5;
+        app.selected_model_index = 5;
+
+        // Move up should adjust offset
+        app.handle_up();
+        assert_eq!(app.selected_model_index, 4);
+        assert_eq!(app.model_list_offset, 4); // Offset follows selection
+    }
+
+    #[tokio::test]
+    async fn test_handle_enter_in_chat_mode() {
+        let mut app = create_test_app();
+
+        app.input = "test message".to_string();
+        app.handle_enter();
+
+        // Should have started streaming
+        assert!(app.is_loading);
+        assert_eq!(app.input, ""); // Input cleared
+        assert_eq!(app.messages.len(), 1); // User message added
+    }
+
+    #[test]
+    fn test_handle_enter_in_model_selection() {
+        let mut app = create_test_app();
+        app.toggle_model_selection();
+
+        // All models initially active
+        assert!(app.active_models[0]);
+
+        // Enter should toggle current model
+        app.handle_enter();
+        assert!(!app.active_models[0]);
+    }
+
+    #[test]
+    fn test_app_initial_state() {
+        let app = create_test_app();
+
+        // Check all new fields are properly initialized
+        assert!(app.streaming_receivers.is_empty());
+        assert!(app.streaming_buffers.is_empty());
+        assert!(app.message_queue.is_empty());
+        assert_eq!(app.spinner_frame, 0);
+        assert_eq!(app.model_list_offset, 0);
     }
 }

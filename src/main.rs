@@ -133,6 +133,12 @@ async fn run_app<B: ratatui::backend::Backend>(
                     KeyCode::Down => {
                         app.handle_down();
                     }
+                    KeyCode::PageUp => {
+                        app.handle_page_up();
+                    }
+                    KeyCode::PageDown => {
+                        app.handle_page_down();
+                    }
                     KeyCode::Tab => {
                         app.cycle_model_selection();
                     }
