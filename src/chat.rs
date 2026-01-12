@@ -112,7 +112,7 @@ mod tests {
         session.add_user_message("Hello".to_string());
 
         assert_eq!(session.messages().len(), 2);
-        assert_eq!(session.messages()[0].content, "System prompt");
-        assert_eq!(session.messages()[1].content, "Hello");
+        assert_eq!(session.messages()[0].content_str(), "System prompt");
+        assert_eq!(session.messages()[1].content_str(), "Hello");
     }
 }

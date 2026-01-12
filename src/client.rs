@@ -1,8 +1,10 @@
 use crate::error::{Result, TuisterError};
 use crate::models::{ChatMessage, ChatResponse, Model, ModelsResponse, StreamResponse};
+use crate::tools::{execute_tool, get_available_tools, Tool, ToolCall};
 use futures::StreamExt;
 use reqwest::Client;
 use serde::Serialize;
+use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 const OPENROUTER_API_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
@@ -14,6 +16,8 @@ struct ChatRequest {
     messages: Vec<ChatMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stream: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<Tool>>,
 }
 
 #[derive(Clone)]
@@ -57,10 +61,22 @@ impl OpenRouterClient {
         messages: &[ChatMessage],
         tx: mpsc::UnboundedSender<String>,
     ) -> Result<()> {
+        self.send_message_streaming_with_tools(model_id, messages.to_vec(), tx)
+            .await
+    }
+
+    /// Internal streaming implementation that handles tool calls recursively
+    async fn send_message_streaming_with_tools(
+        &self,
+        model_id: &str,
+        mut messages: Vec<ChatMessage>,
+        tx: mpsc::UnboundedSender<String>,
+    ) -> Result<()> {
         let request = ChatRequest {
             model: model_id.to_string(),
-            messages: messages.to_vec(),
+            messages: messages.clone(),
             stream: Some(true),
+            tools: Some(get_available_tools()),
         };
 
         let response = self
@@ -83,6 +99,11 @@ impl OpenRouterClient {
 
         let mut stream = response.bytes_stream();
         let mut buffer = String::new();
+
+        // Accumulate tool call data by index
+        let mut tool_call_ids: HashMap<usize, String> = HashMap::new();
+        let mut tool_call_names: HashMap<usize, String> = HashMap::new();
+        let mut tool_call_args: HashMap<usize, String> = HashMap::new();
 
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
@@ -108,16 +129,73 @@ impl OpenRouterClient {
                     // Parse JSON chunk
                     if let Ok(stream_response) = serde_json::from_str::<StreamResponse>(data) {
                         if let Some(choice) = stream_response.choices.first() {
+                            // Handle regular content
                             if let Some(content) = &choice.delta.content {
-                                // Send the chunk to the UI
                                 if tx.send(content.clone()).is_err() {
-                                    // Receiver dropped, stop streaming
                                     return Ok(());
+                                }
+                            }
+
+                            // Handle tool calls (accumulate partial data)
+                            if let Some(tool_calls) = &choice.delta.tool_calls {
+                                for tc in tool_calls {
+                                    let idx = tc.index;
+                                    if let Some(id) = &tc.id {
+                                        tool_call_ids.insert(idx, id.clone());
+                                    }
+                                    if let Some(func) = &tc.function {
+                                        if let Some(name) = &func.name {
+                                            tool_call_names.insert(idx, name.clone());
+                                        }
+                                        if let Some(args) = &func.arguments {
+                                            tool_call_args.entry(idx).or_default().push_str(args);
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
+            }
+        }
+
+        // If we have accumulated tool calls, execute them
+        if !tool_call_ids.is_empty() {
+            let mut tool_calls: Vec<ToolCall> = Vec::new();
+
+            for (idx, id) in &tool_call_ids {
+                if let Some(name) = tool_call_names.get(idx) {
+                    let arguments = tool_call_args.get(idx).cloned().unwrap_or_default();
+                    tool_calls.push(ToolCall {
+                        id: id.clone(),
+                        tool_type: "function".to_string(),
+                        function: crate::tools::FunctionCall {
+                            name: name.clone(),
+                            arguments,
+                        },
+                    });
+                }
+            }
+
+            if !tool_calls.is_empty() {
+                // Send info about tool usage to UI
+                for tc in &tool_calls {
+                    let _ = tx.send(format!("\n[Using tool: {}]\n", tc.function.name));
+                }
+
+                // Add assistant message with tool calls to conversation
+                messages.push(ChatMessage::assistant_with_tool_calls(tool_calls.clone()));
+
+                // Execute each tool and add results
+                for tc in &tool_calls {
+                    let result = execute_tool(tc);
+                    let _ = tx.send(format!("[Tool result: {}]\n", result));
+                    messages.push(ChatMessage::tool_result(tc.id.clone(), result));
+                }
+
+                // Continue the conversation with tool results
+                return Box::pin(self.send_message_streaming_with_tools(model_id, messages, tx))
+                    .await;
             }
         }
 
@@ -129,6 +207,7 @@ impl OpenRouterClient {
             model: model_id.to_string(),
             messages: messages.to_vec(),
             stream: None,
+            tools: Some(get_available_tools()),
         };
 
         let response = self
@@ -152,7 +231,11 @@ impl OpenRouterClient {
         let chat_response: ChatResponse = response.json().await?;
 
         if let Some(choice) = chat_response.choices.first() {
-            Ok(choice.message.content.clone())
+            choice
+                .message
+                .content
+                .clone()
+                .ok_or_else(|| TuisterError::ApiError("No content in response".to_string()))
         } else {
             Err(TuisterError::ApiError("No response from API".to_string()))
         }

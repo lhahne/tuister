@@ -214,9 +214,11 @@ impl App {
         // Restore message history
         for msg in messages {
             match msg.role {
-                Role::System => self.session.add_system_message(msg.content),
-                Role::User => self.session.add_user_message(msg.content),
-                Role::Assistant => {} // Skip assistant messages as they're responses
+                Role::System => self
+                    .session
+                    .add_system_message(msg.content_str().to_string()),
+                Role::User => self.session.add_user_message(msg.content_str().to_string()),
+                Role::Assistant | Role::Tool => {} // Skip assistant/tool messages as they're responses
             }
         }
     }

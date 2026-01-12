@@ -1,3 +1,4 @@
+use crate::tools::ToolCall;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -6,17 +7,28 @@ pub enum Role {
     System,
     User,
     Assistant,
+    Tool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: Role,
-    pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 impl ChatMessage {
     pub fn new(role: Role, content: String) -> Self {
-        Self { role, content }
+        Self {
+            role,
+            content: Some(content),
+            tool_calls: None,
+            tool_call_id: None,
+        }
     }
 
     pub fn user(content: String) -> Self {
@@ -29,6 +41,31 @@ impl ChatMessage {
 
     pub fn system(content: String) -> Self {
         Self::new(Role::System, content)
+    }
+
+    /// Create a tool result message
+    pub fn tool_result(tool_call_id: String, result: String) -> Self {
+        Self {
+            role: Role::Tool,
+            content: Some(result),
+            tool_calls: None,
+            tool_call_id: Some(tool_call_id),
+        }
+    }
+
+    /// Create an assistant message with tool calls
+    pub fn assistant_with_tool_calls(tool_calls: Vec<ToolCall>) -> Self {
+        Self {
+            role: Role::Assistant,
+            content: None,
+            tool_calls: Some(tool_calls),
+            tool_call_id: None,
+        }
+    }
+
+    /// Get content as string, returning empty string if None
+    pub fn content_str(&self) -> &str {
+        self.content.as_deref().unwrap_or("")
     }
 }
 
@@ -104,6 +141,29 @@ pub struct StreamDelta {
     pub content: Option<String>,
     #[serde(default)]
     pub role: Option<String>,
+    #[serde(default)]
+    pub tool_calls: Option<Vec<StreamToolCall>>,
+}
+
+/// Tool call in streaming response (may be partial)
+#[derive(Debug, Clone, Deserialize)]
+pub struct StreamToolCall {
+    pub index: usize,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(rename = "type", default)]
+    pub tool_type: Option<String>,
+    #[serde(default)]
+    pub function: Option<StreamFunctionCall>,
+}
+
+/// Function call in streaming response (may be partial)
+#[derive(Debug, Clone, Deserialize)]
+pub struct StreamFunctionCall {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub arguments: Option<String>,
 }
 
 #[cfg(test)]
@@ -114,15 +174,15 @@ mod tests {
     fn test_chat_message_creation() {
         let msg = ChatMessage::user("Hello".to_string());
         assert_eq!(msg.role, Role::User);
-        assert_eq!(msg.content, "Hello");
+        assert_eq!(msg.content_str(), "Hello");
 
         let msg = ChatMessage::assistant("Hi there".to_string());
         assert_eq!(msg.role, Role::Assistant);
-        assert_eq!(msg.content, "Hi there");
+        assert_eq!(msg.content_str(), "Hi there");
 
         let msg = ChatMessage::system("System message".to_string());
         assert_eq!(msg.role, Role::System);
-        assert_eq!(msg.content, "System message");
+        assert_eq!(msg.content_str(), "System message");
     }
 
     #[test]
