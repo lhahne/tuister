@@ -32,11 +32,29 @@ The compiled binary will be available at `target/release/tuister`.
 
 ### Setting up API Key
 
+You can configure your OpenRouter API key in two ways:
+
+**Option 1: Using a .env file (recommended)**
+
+1. Copy the example file:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Edit `.env` and add your API key:
+   ```bash
+   OPENROUTER_API_KEY=your_api_key_here
+   ```
+
+**Option 2: Using environment variable**
+
 Set your OpenRouter API key as an environment variable:
 
 ```bash
 export OPENROUTER_API_KEY=your_api_key_here
 ```
+
+The application will automatically load the `.env` file if it exists, or fall back to system environment variables.
 
 ### Running the Application
 
@@ -160,6 +178,7 @@ The streaming is handled automatically - responses appear as they're generated b
 - **anyhow**: Error handling in main
 - **thiserror**: Error type definitions
 - **futures**: Stream processing utilities
+- **dotenvy**: .env file support for configuration
 
 ## Future Enhancements
 

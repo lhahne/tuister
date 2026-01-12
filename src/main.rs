@@ -13,6 +13,9 @@ use ui::App;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load .env file if it exists (silently ignore if not found)
+    let _ = dotenvy::dotenv();
+    
     // Get API key from environment
     let api_key = std::env::var("OPENROUTER_API_KEY")
         .expect("OPENROUTER_API_KEY environment variable must be set");
