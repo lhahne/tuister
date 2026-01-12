@@ -112,14 +112,6 @@ async fn run_app<B: ratatui::backend::Backend>(
                 
                 // Handle other keys based on current mode
                 match key.code {
-                    KeyCode::Char('q') => {
-                        // Only quit if not in chat mode typing
-                        if !app.is_in_chat_mode() || app.is_input_empty() {
-                            return Ok(());
-                        } else {
-                            app.input_char('q');
-                        }
-                    }
                     KeyCode::Char(' ') => {
                         app.toggle_current_model();
                     }

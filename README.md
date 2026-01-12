@@ -76,13 +76,13 @@ Or if you've built the release binary:
 - **Tab** to cycle between 1, 2, or 3 active models
 - **↑/↓** to scroll through chat history
 - **Ctrl+M** to open model selection
-- **Ctrl+C** to quit (or **q** when input box is empty)
+- **Ctrl+C** to quit
 
 #### Model Selection Mode
 - **↑/↓** to navigate through available models
 - **Space** or **Enter** to toggle model selection
 - **Ctrl+M** to return to chat
-- **Ctrl+C** or **q** to quit
+- **Ctrl+C** to quit
 
 ## Available Models
 

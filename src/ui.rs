@@ -164,10 +164,6 @@ impl App {
         self.mode == AppMode::Chat
     }
     
-    pub fn is_input_empty(&self) -> bool {
-        self.input.is_empty()
-    }
-    
     pub fn scroll_up(&mut self) {
         if self.scroll > 0 {
             self.scroll -= 1;
@@ -361,7 +357,7 @@ fn render_model_selection_mode(f: &mut Frame, app: &App) {
     f.render_widget(list, chunks[1]);
     
     // Help text
-    let help_text = "Ctrl+M: Back to chat | Space/Enter: Toggle model | ↑↓: Navigate | q/Ctrl+C: Quit";
+    let help_text = "Ctrl+M: Back to chat | Space/Enter: Toggle model | ↑↓: Navigate | Ctrl+C: Quit";
     let help = Paragraph::new(help_text)
         .style(Style::default())
         .block(Block::default().borders(Borders::ALL).title("Help"));
@@ -474,7 +470,7 @@ fn render_input(f: &mut Frame, area: Rect, app: &App) {
     
     let input = Paragraph::new(input_text)
         .style(style)
-        .block(Block::default().borders(Borders::ALL).title("Input (Enter to send, Ctrl+C/q to quit)"));
+        .block(Block::default().borders(Borders::ALL).title("Input (Enter to send, Ctrl+C to quit)"));
     
     f.render_widget(input, area);
     
@@ -565,18 +561,6 @@ mod tests {
         
         app.toggle_model_selection();
         assert!(app.is_in_chat_mode());
-    }
-    
-    #[test]
-    fn test_is_input_empty() {
-        let mut app = create_test_app();
-        assert!(app.is_input_empty());
-        
-        app.input_char('a');
-        assert!(!app.is_input_empty());
-        
-        app.delete_char();
-        assert!(app.is_input_empty());
     }
     
     #[test]
