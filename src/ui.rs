@@ -2,11 +2,12 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
     Frame,
 };
 use tuister::{ChatSession, Model, OpenRouterClient, Role};
 use tokio::sync::mpsc;
+use std::collections::HashMap;
 
 #[derive(Debug, PartialEq)]
 enum AppMode {
@@ -18,6 +19,7 @@ pub struct App {
     session: ChatSession,
     input: String,
     messages: Vec<DisplayMessage>,
+    model_responses: HashMap<String, Vec<String>>, // model_name -> responses
     scroll: usize,
     active_models: Vec<bool>,
     is_loading: bool,
@@ -42,6 +44,7 @@ impl App {
             session,
             input: String::new(),
             messages: Vec::new(),
+            model_responses: HashMap::new(),
             scroll: 0,
             active_models,
             is_loading: false,
@@ -204,7 +207,12 @@ impl App {
         }
         
         let user_message = self.input.clone();
+        
+        // Clear input immediately
         self.input.clear();
+        
+        // Show loading indicator
+        self.is_loading = true;
         
         // Add user message to display
         self.messages.push(DisplayMessage {
@@ -215,8 +223,6 @@ impl App {
         
         // Add user message to session
         self.session.add_user_message(user_message);
-        
-        self.is_loading = true;
         
         // Get active models
         let active_models = self.session.models().to_vec();
@@ -237,12 +243,7 @@ impl App {
                     // Streaming completed
                     if let Err(e) = result {
                         // If streaming failed, show error
-                        self.messages.push(DisplayMessage {
-                            role: Role::Assistant,
-                            content: format!("Streaming error: {}", e),
-                            model_name: Some(model_name.clone()),
-                        });
-                        continue;
+                        full_response = format!("Error: {}", e);
                     }
                 }
                 _ = async {
@@ -256,9 +257,15 @@ impl App {
             if !full_response.is_empty() {
                 self.messages.push(DisplayMessage {
                     role: Role::Assistant,
-                    content: full_response,
-                    model_name: Some(model_name),
+                    content: full_response.clone(),
+                    model_name: Some(model_name.clone()),
                 });
+                
+                // Also add to model_responses for side-by-side display
+                self.model_responses
+                    .entry(model_name)
+                    .or_default()
+                    .push(full_response);
             }
         }
         
@@ -279,17 +286,17 @@ fn render_chat_mode(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Min(1),
-            Constraint::Length(3),
+            Constraint::Length(3),  // Header
+            Constraint::Min(1),     // Model response panes
+            Constraint::Length(3),  // Input
         ])
         .split(f.area());
     
     // Header
     render_header(f, chunks[0], app);
     
-    // Messages
-    render_messages(f, chunks[1], app);
+    // Model response panes (side by side)
+    render_model_panes(f, chunks[1], app);
     
     // Input
     render_input(f, chunks[2], app);
@@ -380,53 +387,85 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(header, area);
 }
 
-fn render_messages(f: &mut Frame, area: Rect, app: &App) {
-    let items: Vec<ListItem> = app
+fn render_model_panes(f: &mut Frame, area: Rect, app: &App) {
+    // Get active models
+    let active_models: Vec<_> = app
+        .available_models
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i < app.active_models.len() && app.active_models[*i])
+        .map(|(_, m)| m)
+        .collect();
+    
+    if active_models.is_empty() {
+        let empty = Paragraph::new("No models selected")
+            .block(Block::default().borders(Borders::ALL))
+            .style(Style::default().fg(Color::DarkGray));
+        f.render_widget(empty, area);
+        return;
+    }
+    
+    // Create horizontal layout for side-by-side panes
+    let num_models = active_models.len();
+    let constraints: Vec<Constraint> = (0..num_models)
+        .map(|_| Constraint::Percentage(100 / num_models as u16))
+        .collect();
+    
+    let panes = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(constraints)
+        .split(area);
+    
+    // Render each model's pane
+    for (idx, model) in active_models.iter().enumerate() {
+        render_model_pane(f, panes[idx], app, &model.name);
+    }
+}
+
+fn render_model_pane(f: &mut Frame, area: Rect, app: &App, model_name: &str) {
+    // Get all messages for this model
+    let model_messages: Vec<_> = app
         .messages
         .iter()
-        .map(|msg| {
-            let (style, prefix) = match msg.role {
-                Role::User => (
-                    Style::default().fg(Color::Cyan),
-                    "You: ".to_string(),
-                ),
-                Role::Assistant => {
-                    let model_prefix = if let Some(ref name) = msg.model_name {
-                        format!("{}: ", name)
-                    } else {
-                        "Assistant: ".to_string()
-                    };
-                    (Style::default().fg(Color::Green), model_prefix)
-                }
-                Role::System => (
-                    Style::default().fg(Color::Yellow),
-                    "System: ".to_string(),
-                ),
-            };
-            
-            let content = format!("{}{}", prefix, msg.content);
-            ListItem::new(content).style(style)
+        .filter_map(|msg| {
+            match &msg.model_name {
+                Some(name) if name == model_name => Some(msg.content.clone()),
+                None if msg.role == Role::User => Some(format!("You: {}", msg.content)),
+                _ => None,
+            }
         })
         .collect();
     
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Chat (↑↓ to scroll)"),
-    );
+    let content = if app.is_loading && model_messages.is_empty() {
+        "⏳ Waiting for response...".to_string()
+    } else if model_messages.is_empty() {
+        "No messages yet".to_string()
+    } else {
+        model_messages.join("\n\n")
+    };
     
-    f.render_widget(list, area);
+    let paragraph = Paragraph::new(content)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(model_name)
+                .style(Style::default()),
+        )
+        .wrap(Wrap { trim: true })
+        .style(Style::default().fg(Color::White));
+    
+    f.render_widget(paragraph, area);
 }
 
 fn render_input(f: &mut Frame, area: Rect, app: &App) {
-    let input_text = if app.is_loading {
-        "Loading...".to_string()
+    let (input_text, style) = if app.is_loading {
+        ("⏳ Waiting for responses...".to_string(), Style::default().fg(Color::Yellow))
     } else {
-        app.input.clone()
+        (app.input.clone(), Style::default())
     };
     
     let input = Paragraph::new(input_text)
-        .style(Style::default())
+        .style(style)
         .block(Block::default().borders(Borders::ALL).title("Input (Enter to send, Ctrl+C/q to quit)"));
     
     f.render_widget(input, area);
