@@ -684,8 +684,8 @@ fn render_model_pane(f: &mut Frame, area: Rect, app: &App, model_name: &str, is_
                 if line_len == 0 {
                     1 // empty lines still take 1 line
                 } else {
-                    // Ceiling division to get number of wrapped lines
-                    ((line_len + inner_width - 1) / inner_width) as u16
+                    // Use div_ceil to get number of wrapped lines
+                    line_len.div_ceil(inner_width) as u16
                 }
             })
             .sum()

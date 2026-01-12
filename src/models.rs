@@ -18,15 +18,15 @@ impl ChatMessage {
     pub fn new(role: Role, content: String) -> Self {
         Self { role, content }
     }
-    
+
     pub fn user(content: String) -> Self {
         Self::new(Role::User, content)
     }
-    
+
     pub fn assistant(content: String) -> Self {
         Self::new(Role::Assistant, content)
     }
-    
+
     pub fn system(content: String) -> Self {
         Self::new(Role::System, content)
     }
@@ -115,11 +115,11 @@ mod tests {
         let msg = ChatMessage::user("Hello".to_string());
         assert_eq!(msg.role, Role::User);
         assert_eq!(msg.content, "Hello");
-        
+
         let msg = ChatMessage::assistant("Hi there".to_string());
         assert_eq!(msg.role, Role::Assistant);
         assert_eq!(msg.content, "Hi there");
-        
+
         let msg = ChatMessage::system("System message".to_string());
         assert_eq!(msg.role, Role::System);
         assert_eq!(msg.content, "System message");
@@ -137,11 +137,11 @@ mod tests {
         let user_role = Role::User;
         let json = serde_json::to_string(&user_role).unwrap();
         assert_eq!(json, "\"user\"");
-        
+
         let assistant_role = Role::Assistant;
         let json = serde_json::to_string(&assistant_role).unwrap();
         assert_eq!(json, "\"assistant\"");
-        
+
         let system_role = Role::System;
         let json = serde_json::to_string(&system_role).unwrap();
         assert_eq!(json, "\"system\"");

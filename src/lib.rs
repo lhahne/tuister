@@ -1,9 +1,11 @@
-pub mod client;
-pub mod models;
 pub mod chat;
+pub mod client;
 pub mod error;
+pub mod models;
 
-pub use client::OpenRouterClient;
-pub use models::{ChatMessage, Model, ModelInfo, ModelsResponse, Role, StreamDelta, StreamResponse};
 pub use chat::ChatSession;
-pub use error::{TuisterError, Result};
+pub use client::OpenRouterClient;
+pub use error::{Result, TuisterError};
+pub use models::{
+    ChatMessage, Model, ModelInfo, ModelsResponse, Role, StreamDelta, StreamResponse,
+};

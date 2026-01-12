@@ -27,14 +27,10 @@ impl OpenRouterClient {
         let client = Client::new();
         Ok(Self { client, api_key })
     }
-    
+
     pub async fn fetch_models(&self) -> Result<Vec<Model>> {
-        let response = self
-            .client
-            .get(OPENROUTER_MODELS_URL)
-            .send()
-            .await?;
-        
+        let response = self.client.get(OPENROUTER_MODELS_URL).send().await?;
+
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
@@ -43,18 +39,18 @@ impl OpenRouterClient {
                 status, error_text
             )));
         }
-        
+
         let models_response: ModelsResponse = response.json().await?;
-        
+
         let models = models_response
             .data
             .into_iter()
             .map(|model_info| Model::new(model_info.id, model_info.name))
             .collect();
-        
+
         Ok(models)
     }
-    
+
     pub async fn send_message_streaming(
         &self,
         model_id: &str,
@@ -66,7 +62,7 @@ impl OpenRouterClient {
             messages: messages.to_vec(),
             stream: Some(true),
         };
-        
+
         let response = self
             .client
             .post(OPENROUTER_API_URL)
@@ -75,7 +71,7 @@ impl OpenRouterClient {
             .json(&request)
             .send()
             .await?;
-        
+
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
@@ -84,31 +80,31 @@ impl OpenRouterClient {
                 status, error_text
             )));
         }
-        
+
         let mut stream = response.bytes_stream();
         let mut buffer = String::new();
-        
+
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
             let text = String::from_utf8_lossy(&chunk);
             buffer.push_str(&text);
-            
+
             // Process complete lines
             while let Some(newline_pos) = buffer.find('\n') {
                 let line = buffer[..newline_pos].trim().to_string();
                 buffer = buffer[newline_pos + 1..].to_string();
-                
+
                 // Skip empty lines and comments
                 if line.is_empty() || line.starts_with(':') {
                     continue;
                 }
-                
+
                 // Parse SSE data
                 if let Some(data) = line.strip_prefix("data: ") {
                     if data == "[DONE]" {
                         break;
                     }
-                    
+
                     // Parse JSON chunk
                     if let Ok(stream_response) = serde_json::from_str::<StreamResponse>(data) {
                         if let Some(choice) = stream_response.choices.first() {
@@ -124,21 +120,17 @@ impl OpenRouterClient {
                 }
             }
         }
-        
+
         Ok(())
     }
-    
-    pub async fn send_message(
-        &self,
-        model_id: &str,
-        messages: &[ChatMessage],
-    ) -> Result<String> {
+
+    pub async fn send_message(&self, model_id: &str, messages: &[ChatMessage]) -> Result<String> {
         let request = ChatRequest {
             model: model_id.to_string(),
             messages: messages.to_vec(),
             stream: None,
         };
-        
+
         let response = self
             .client
             .post(OPENROUTER_API_URL)
@@ -147,7 +139,7 @@ impl OpenRouterClient {
             .json(&request)
             .send()
             .await?;
-        
+
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
@@ -156,15 +148,13 @@ impl OpenRouterClient {
                 status, error_text
             )));
         }
-        
+
         let chat_response: ChatResponse = response.json().await?;
-        
+
         if let Some(choice) = chat_response.choices.first() {
             Ok(choice.message.content.clone())
         } else {
-            Err(TuisterError::ApiError(
-                "No response from API".to_string(),
-            ))
+            Err(TuisterError::ApiError("No response from API".to_string()))
         }
     }
 }
