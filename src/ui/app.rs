@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use tokio::sync::mpsc;
+use tuister::config::Config;
 use tuister::{ChatSession, Model, OpenRouterClient, Role};
 
 const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -47,9 +48,32 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(session: ChatSession, available_models: Vec<Model>) -> Self {
+    /// Create a new App, optionally with saved model selection
+    pub fn new(
+        session: ChatSession,
+        available_models: Vec<Model>,
+        saved_model_ids: Option<Vec<String>>,
+    ) -> Self {
         let num_models = available_models.len();
-        let active_models: Vec<bool> = (0..num_models).map(|i| i < 3).collect();
+
+        // Determine active models based on saved selection or defaults
+        let active_models: Vec<bool> = if let Some(saved_ids) = saved_model_ids {
+            // Mark models as active if their ID is in the saved list
+            available_models
+                .iter()
+                .map(|m| saved_ids.contains(&m.id))
+                .collect()
+        } else {
+            // Default: first 3 models
+            (0..num_models).map(|i| i < 3).collect()
+        };
+
+        // Ensure at least one model is active
+        let active_models = if active_models.iter().any(|&x| x) {
+            active_models
+        } else {
+            (0..num_models).map(|i| i < 1).collect()
+        };
 
         Self {
             session,
@@ -172,6 +196,11 @@ impl App {
                 return;
             }
         }
+
+        // Save the selected model IDs to config
+        let selected_ids: Vec<String> = selected_models.iter().map(|m| m.id.clone()).collect();
+        let config = Config::with_selected_models(selected_ids);
+        let _ = config.save(); // Ignore save errors silently
 
         // Create a new session with selected models
         // We need to preserve the API key from the old session

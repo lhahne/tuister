@@ -33,7 +33,7 @@ mod tests {
         ];
         let available_models = models.clone();
         let session = ChatSession::new(client, models);
-        App::new(session, available_models)
+        App::new(session, available_models, None)
     }
 
     #[test]

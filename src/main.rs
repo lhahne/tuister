@@ -8,6 +8,7 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
+use tuister::config::Config;
 use tuister::{ChatSession, OpenRouterClient};
 use ui::App;
 
@@ -52,11 +53,34 @@ async fn main() -> Result<()> {
     // Create client for chat (reuse API key)
     let chat_client = OpenRouterClient::new(api_key)?;
 
-    // Start with first 3 models selected by default
-    let default_models = available_models.iter().take(3).cloned().collect();
+    // Load saved config (for model selection persistence)
+    let config = Config::load();
+    let saved_model_ids = if config.selected_model_ids.is_empty() {
+        None
+    } else {
+        Some(config.selected_model_ids)
+    };
+
+    // Start with saved models or first 3 by default
+    let default_models = if let Some(ref ids) = saved_model_ids {
+        available_models
+            .iter()
+            .filter(|m| ids.contains(&m.id))
+            .cloned()
+            .collect::<Vec<_>>()
+    } else {
+        available_models.iter().take(3).cloned().collect()
+    };
+
+    // Ensure at least one model is selected
+    let default_models = if default_models.is_empty() {
+        available_models.iter().take(1).cloned().collect()
+    } else {
+        default_models
+    };
 
     let session = ChatSession::new(chat_client, default_models);
-    let mut app = App::new(session, available_models);
+    let mut app = App::new(session, available_models, saved_model_ids);
 
     // Run the app
     let res = run_app(&mut terminal, &mut app).await;
