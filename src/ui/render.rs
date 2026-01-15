@@ -6,13 +6,13 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
 use tuister::Role;
 use unicode_width::UnicodeWidthStr;
 
-use crate::ui::app::App;
+use crate::ui::app::{App, AppMode};
 use crate::ui::markdown::parse_markdown;
 
 /// Render the chat mode UI
@@ -34,6 +34,11 @@ pub fn render_chat_mode(f: &mut Frame, app: &App) {
 
     // Input
     render_input(f, chunks[2], app);
+
+    // Render About popup if in About mode
+    if app.mode == AppMode::About {
+        render_about_popup(f, app);
+    }
 }
 
 /// Render the model selection mode UI
@@ -312,4 +317,75 @@ fn render_input(f: &mut Frame, area: Rect, app: &App) {
             f.set_cursor_position((cursor_x, cursor_y));
         }
     }
+}
+
+pub fn render_about_popup(f: &mut Frame, _app: &App) {
+    let area = centered_rect(60, 60, f.area());
+
+    let version = env!("CARGO_PKG_VERSION");
+    let content = vec![
+        Line::from(vec![
+            Span::styled(
+                "Tuister",
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .fg(Color::Cyan),
+            ),
+            Span::raw(format!(" v{}", version)),
+        ]),
+        Line::from(""),
+        Line::from("A multi-model AI chat terminal interface."),
+        Line::from("Compare responses from different LLMs side-by-side."),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Key Bindings:",
+            Style::default().add_modifier(Modifier::UNDERLINED),
+        )),
+        Line::from("Ctrl+H      - Toggle this About screen"),
+        Line::from("Ctrl+C      - Cancel streaming / Double-press to Quit"),
+        Line::from("Ctrl+N      - Clear chat history"),
+        Line::from("Esc         - Toggle model selection"),
+        Line::from("Tab         - Cycle between 1, 2, or 3 models"),
+        Line::from("Left/Right  - Focus different model panels"),
+        Line::from("Up/Down     - Scroll focused panel"),
+        Line::from("Enter       - Send message"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Press Esc or Ctrl+H to close",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+
+    let block = Block::default()
+        .title(" About Tuister ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let paragraph = Paragraph::new(content)
+        .block(block)
+        .wrap(Wrap { trim: true });
+
+    f.render_widget(Clear, area); // This clears the background
+    f.render_widget(paragraph, area);
+}
+
+/// helper function to create a centered rect using up certain percentage of the available rect `r`
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }

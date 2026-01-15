@@ -13,7 +13,7 @@ use render::{render_chat_mode, render_model_selection_mode};
 /// Main UI rendering function - dispatches to appropriate renderer based on app mode
 pub fn ui(f: &mut Frame, app: &App) {
     match app.mode {
-        AppMode::Chat => render_chat_mode(f, app),
+        AppMode::Chat | AppMode::About => render_chat_mode(f, app),
         AppMode::ModelSelection => render_model_selection_mode(f, app),
     }
 }
@@ -533,6 +533,15 @@ mod tests {
             .insert("Model 1".to_string(), "Loading response...".to_string());
         let (_tx, rx) = mpsc::unbounded_channel::<String>();
         app.streaming_receivers.push(("Model 1".to_string(), rx));
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|f| ui(f, &app)).unwrap();
+        insta::assert_snapshot!(terminal.backend());
+    }
+
+    #[test]
+    fn test_render_about_snapshot() {
+        let mut app = create_test_app();
+        app.toggle_about();
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal.draw(|f| ui(f, &app)).unwrap();
         insta::assert_snapshot!(terminal.backend());

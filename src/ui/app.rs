@@ -13,6 +13,7 @@ const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦
 pub enum AppMode {
     Chat,
     ModelSelection,
+    About,
 }
 
 #[derive(Clone)]
@@ -99,13 +100,24 @@ impl App {
 
     pub fn toggle_model_selection(&mut self) {
         match self.mode {
-            AppMode::Chat => {
+            AppMode::Chat | AppMode::About => {
                 self.mode = AppMode::ModelSelection;
                 self.selected_model_index = 0;
             }
             AppMode::ModelSelection => {
                 self.mode = AppMode::Chat;
                 self.update_session_models();
+            }
+        }
+    }
+
+    pub fn toggle_about(&mut self) {
+        match self.mode {
+            AppMode::Chat | AppMode::ModelSelection => {
+                self.mode = AppMode::About;
+            }
+            AppMode::About => {
+                self.mode = AppMode::Chat;
             }
         }
     }
@@ -124,7 +136,7 @@ impl App {
 
     pub fn handle_up(&mut self) {
         match self.mode {
-            AppMode::Chat => self.scroll_up(),
+            AppMode::Chat | AppMode::About => self.scroll_up(),
             AppMode::ModelSelection => {
                 if self.selected_model_index > 0 {
                     self.selected_model_index -= 1;
@@ -139,7 +151,7 @@ impl App {
 
     pub fn handle_down(&mut self) {
         match self.mode {
-            AppMode::Chat => self.scroll_down(),
+            AppMode::Chat | AppMode::About => self.scroll_down(),
             AppMode::ModelSelection => {
                 if self.selected_model_index < self.available_models.len() - 1 {
                     self.selected_model_index += 1;
@@ -172,7 +184,7 @@ impl App {
 
     pub fn handle_enter(&mut self) {
         match self.mode {
-            AppMode::Chat => self.submit_message(),
+            AppMode::Chat | AppMode::About => self.submit_message(),
             AppMode::ModelSelection => {
                 self.toggle_current_model();
             }

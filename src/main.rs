@@ -158,9 +158,19 @@ async fn run_app<B: ratatui::backend::Backend>(
                     continue;
                 }
 
+                // Handle Ctrl+h for about screen
+                if key.code == KeyCode::Char('h') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                    app.toggle_about();
+                    continue;
+                }
+
                 // Handle Escape to toggle model selection from any mode
                 if key.code == KeyCode::Esc {
-                    app.toggle_model_selection();
+                    if app.mode == ui::AppMode::About {
+                        app.toggle_about();
+                    } else {
+                        app.toggle_model_selection();
+                    }
                     continue;
                 }
 
