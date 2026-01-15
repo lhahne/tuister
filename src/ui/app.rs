@@ -505,4 +505,63 @@ impl App {
     pub fn is_streaming(&self) -> bool {
         self.is_loading || !self.streaming_receivers.is_empty()
     }
+
+    /// Clear all chats and reset the session
+    pub fn clear_chat(&mut self) {
+        // Cancel any ongoing streaming first
+        self.cancel_streaming();
+
+        // Clear display messages and model responses
+        self.messages.clear();
+        self.model_responses.clear();
+        self.message_queue.clear();
+
+        // Clear input
+        self.input.clear();
+
+        // Clear session messages
+        self.session.clear_messages();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_app() -> App {
+        let api_key = "test_key".to_string();
+        let client = OpenRouterClient::new(api_key).unwrap();
+        let models = vec![
+            Model::new("model1", "Model 1"),
+            Model::new("model2", "Model 2"),
+            Model::new("model3", "Model 3"),
+        ];
+        let available_models = models.clone();
+        let session = ChatSession::new(client, models);
+        App::new(session, available_models, None)
+    }
+
+    #[test]
+    fn test_clear_chat() {
+        let mut app = create_test_app();
+
+        // Add some state
+        app.input = "test input".to_string();
+        app.messages.push(DisplayMessage {
+            role: Role::User,
+            content: "test message".to_string(),
+            model_name: None,
+        });
+        app.session.add_user_message("test message".to_string());
+
+        // Clear chat
+        app.clear_chat();
+
+        // Verify state is cleared
+        assert!(app.input.is_empty());
+        assert!(app.messages.is_empty());
+        assert!(app.model_responses.is_empty());
+        assert!(app.message_queue.is_empty());
+        assert!(app.session.messages().is_empty());
+    }
 }

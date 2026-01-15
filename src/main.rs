@@ -152,6 +152,12 @@ async fn run_app<B: ratatui::backend::Backend>(
                 // Any other key resets the pending quit state
                 pending_quit = false;
 
+                // Handle Ctrl+n to clear chat
+                if key.code == KeyCode::Char('n') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                    app.clear_chat();
+                    continue;
+                }
+
                 // Handle Escape to toggle model selection from any mode
                 if key.code == KeyCode::Esc {
                     app.toggle_model_selection();

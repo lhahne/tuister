@@ -10,6 +10,7 @@ use ratatui::{
     Frame,
 };
 use tuister::Role;
+use unicode_width::UnicodeWidthStr;
 
 use crate::ui::app::App;
 
@@ -248,7 +249,7 @@ fn render_model_pane(f: &mut Frame, area: Rect, app: &App, model_name: &str, is_
         content
             .lines()
             .map(|line| {
-                let line_len = line.chars().count();
+                let line_len = line.width();
                 if line_len == 0 {
                     1 // empty lines still take 1 line
                 } else {
@@ -302,7 +303,7 @@ fn render_input(f: &mut Frame, area: Rect, app: &App) {
 
     // Always show cursor in chat mode
     if app.is_in_chat_mode() {
-        let cursor_x = area.x + 1 + app.input.len() as u16;
+        let cursor_x = area.x + 1 + app.input.width() as u16;
         let cursor_y = area.y + 1;
 
         if cursor_x < area.x + area.width - 1 {

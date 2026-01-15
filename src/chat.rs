@@ -34,6 +34,10 @@ impl ChatSession {
         &self.messages
     }
 
+    pub fn clear_messages(&mut self) {
+        self.messages.clear();
+    }
+
     pub async fn send_to_model_streaming(
         &mut self,
         model: &Model,
