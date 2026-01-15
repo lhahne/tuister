@@ -13,6 +13,7 @@ use tuister::Role;
 use unicode_width::UnicodeWidthStr;
 
 use crate::ui::app::App;
+use crate::ui::markdown::parse_markdown;
 
 /// Render the chat mode UI
 pub fn render_chat_mode(f: &mut Frame, app: &App) {
@@ -190,7 +191,6 @@ fn render_model_pane(f: &mut Frame, area: Rect, app: &App, model_name: &str, is_
         })
         .collect();
 
-    // Build content: completed messages + streaming buffer + spinner
     let mut content = if model_messages.is_empty() {
         String::new()
     } else {
@@ -218,6 +218,8 @@ fn render_model_pane(f: &mut Frame, area: Rect, app: &App, model_name: &str, is_
         content = "No messages yet".to_string();
     }
 
+    let styled_content = parse_markdown(&content);
+
     // Build title with focus indicator and spinner if streaming
     let focus_indicator = if is_focused { "► " } else { "" };
     let title = if is_streaming {
@@ -244,22 +246,22 @@ fn render_model_pane(f: &mut Frame, area: Rect, app: &App, model_name: &str, is_
     let inner_width = area.width.saturating_sub(2) as usize; // -2 for borders
     let visible_height = area.height.saturating_sub(2); // -2 for borders
 
-    // Count wrapped lines by calculating how many visual lines each content line takes
+    // Count wrapped lines from the styled Text
     let wrapped_lines: u16 = if inner_width > 0 {
-        content
-            .lines()
+        styled_content
+            .lines
+            .iter()
             .map(|line| {
-                let line_len = line.width();
-                if line_len == 0 {
-                    1 // empty lines still take 1 line
+                let line_width = line.width();
+                if line_width == 0 {
+                    1
                 } else {
-                    // Use div_ceil to get number of wrapped lines
-                    line_len.div_ceil(inner_width) as u16
+                    line_width.div_ceil(inner_width) as u16
                 }
             })
             .sum()
     } else {
-        content.lines().count() as u16
+        styled_content.lines.len() as u16
     };
 
     // Determine final scroll position
@@ -273,7 +275,7 @@ fn render_model_pane(f: &mut Frame, area: Rect, app: &App, model_name: &str, is_
         scroll_offset
     };
 
-    let paragraph = Paragraph::new(content)
+    let paragraph = Paragraph::new(styled_content)
         .block(
             Block::default()
                 .borders(Borders::ALL)

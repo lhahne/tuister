@@ -3,6 +3,7 @@
 //! This module provides the main UI entry point and re-exports from submodules.
 
 mod app;
+mod markdown;
 mod render;
 
 pub use app::{App, AppMode};
