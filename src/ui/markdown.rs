@@ -44,7 +44,7 @@ pub fn parse_markdown(markdown: &str) -> Text<'_> {
                         style_stack.push(current_style.fg(Color::LightYellow));
                         // Start a new line for code blocks if not already at the start
                         if !current_line.is_empty() {
-                            lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
+                            lines.push(Line::from(std::mem::take(&mut current_line)));
                         }
                     }
                     Tag::List(_first_num) => {
@@ -73,7 +73,7 @@ pub fn parse_markdown(markdown: &str) -> Text<'_> {
                     | TagEnd::Paragraph
                     | TagEnd::BlockQuote(_) => {
                         if !current_line.is_empty() {
-                            lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
+                            lines.push(Line::from(std::mem::take(&mut current_line)));
                         }
                         if !matches!(tag, TagEnd::Item) {
                             lines.push(Line::from(""));
@@ -81,7 +81,7 @@ pub fn parse_markdown(markdown: &str) -> Text<'_> {
                     }
                     TagEnd::CodeBlock => {
                         if !current_line.is_empty() {
-                            lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
+                            lines.push(Line::from(std::mem::take(&mut current_line)));
                         }
                         lines.push(Line::from(""));
                     }
@@ -98,7 +98,7 @@ pub fn parse_markdown(markdown: &str) -> Text<'_> {
                             current_line.push(Span::styled(part.to_string(), current_style));
                         }
                         if i < parts.len() - 1 {
-                            lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
+                            lines.push(Line::from(std::mem::take(&mut current_line)));
                         }
                     }
                 } else {
@@ -113,7 +113,7 @@ pub fn parse_markdown(markdown: &str) -> Text<'_> {
                 ));
             }
             Event::SoftBreak | Event::HardBreak => {
-                lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
+                lines.push(Line::from(std::mem::take(&mut current_line)));
             }
             _ => {}
         }
