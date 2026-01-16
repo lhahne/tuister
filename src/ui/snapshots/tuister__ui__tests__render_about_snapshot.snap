@@ -1,0 +1,28 @@
+---
+source: src/ui/mod.rs
+expression: terminal.backend()
+---
+"┌Active Models─────────────────────────────────────────────────────────────────┐"
+"│[Model 1] [Model 2] [Model 3] (←→: focus panel | ↑↓: scroll | Tab: cycle | Esc│"
+"└──────────────────────────────────────────────────────────────────────────────┘"
+"┌► Model 1───────────────┐┌Model 2──────────────────┐┌Model 3─────────────────┐ "
+"│No messages yet         ││No messages yet          ││No messages yet         │ "
+"│               ┌ About Tuister ───────────────────────────────┐              │ "
+"│               │Tuister v0.1.0                                │              │ "
+"│               │                                              │              │ "
+"│               │A multi-model AI chat terminal interface.     │              │ "
+"│               │Compare responses from different LLMs         │              │ "
+"│               │side-by-side.                                 │              │ "
+"│               │                                              │              │ "
+"│               │Key Bindings:                                 │              │ "
+"│               │Ctrl+H      - Toggle this About screen        │              │ "
+"│               │Ctrl+C      - Cancel streaming / Double-press │              │ "
+"│               │to Quit                                       │              │ "
+"│               │Ctrl+N      - Clear chat history              │              │ "
+"│               │Esc         - Toggle model selection          │              │ "
+"│               └──────────────────────────────────────────────┘              │ "
+"│                        ││                         ││                        │ "
+"└────────────────────────┘└─────────────────────────┘└────────────────────────┘ "
+"┌Input─────────────────────────────────────────────────────────────────────────┐"
+"│                                                                              │"
+"└──────────────────────────────────────────────────────────────────────────────┘"

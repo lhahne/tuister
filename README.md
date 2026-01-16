@@ -1,1 +1,195 @@
-# tuister
+# Tuister
+
+A Terminal User Interface (TUI) application for chatting with 1 to 3 Large Language Models (LLMs) simultaneously using OpenRouter as the backend.
+
+## Features
+
+- **Multi-Model Chat**: Chat with 1, 2, or 3 LLMs at the same time
+- **Streaming Responses**: Real-time streaming of LLM responses for faster feedback
+- **TUI Interface**: Clean, terminal-based interface built with Ratatui
+- **Library Architecture**: Core functionality separated into a library for future UI implementations
+- **OpenRouter Integration**: Uses OpenRouter API to access multiple LLM providers
+- **Dynamic Model Discovery**: Automatically fetches latest available models from OpenRouter
+
+## Installation
+
+### Prerequisites
+
+- Rust 1.70 or later
+- An OpenRouter API key ([Get one here](https://openrouter.ai/))
+
+### Building from Source
+
+```bash
+git clone https://github.com/lhahne/tuister.git
+cd tuister
+cargo build --release
+```
+
+The compiled binary will be available at `target/release/tuister`.
+
+## Usage
+
+### Setting up API Key
+
+You can configure your OpenRouter API key in two ways:
+
+**Option 1: Using a .env file (recommended)**
+
+1. Copy the example file:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Edit `.env` and add your API key:
+   ```bash
+   OPENROUTER_API_KEY=your_api_key_here
+   ```
+
+**Option 2: Using environment variable**
+
+Set your OpenRouter API key as an environment variable:
+
+```bash
+export OPENROUTER_API_KEY=your_api_key_here
+```
+
+The application will automatically load the `.env` file if it exists, or fall back to system environment variables.
+
+### Running the Application
+
+```bash
+cargo run
+```
+
+Or if you've built the release binary:
+
+```bash
+./target/release/tuister
+```
+
+### Controls
+
+#### Chat Mode
+- **Type** to enter your message (cursor visible in input box)
+- **Enter** to send message to all active models
+- **Tab** to cycle between 1, 2, or 3 active models
+- **↑/↓** to scroll through chat history
+- **Ctrl+M** to open model selection
+- **Ctrl+C** to quit
+
+#### Model Selection Mode
+- **↑/↓** to navigate through available models
+- **Space** or **Enter** to toggle model selection
+- **Ctrl+M** to return to chat
+- **Ctrl+C** to quit
+
+## Available Models
+
+The application **dynamically fetches** the complete list of available models from OpenRouter's API on startup. This ensures you always have access to the latest models without needing to update the application.
+
+### Model Discovery
+- Models are automatically fetched from OpenRouter's `/api/v1/models` endpoint
+- The list includes all models available through OpenRouter from various providers:
+  - OpenAI (GPT-3.5, GPT-4, etc.)
+  - Anthropic (Claude models)
+  - Google (Gemini models)
+  - Meta (Llama models)
+  - Mistral AI
+  - And many more...
+
+### Fallback Models
+If the API is unavailable, the app falls back to a curated list of popular models:
+1. GPT-3.5 Turbo (OpenAI)
+2. GPT-4 (OpenAI)
+3. GPT-4 Turbo (OpenAI)
+4. Claude 3 Haiku (Anthropic)
+5. Claude 3 Sonnet (Anthropic)
+6. Claude 3 Opus (Anthropic)
+7. Gemini Flash 1.5 (Google)
+8. Gemini Pro 1.5 (Google)
+9. Llama 3 70B (Meta)
+10. Mistral 7B (Mistral AI)
+
+By default, the first 3 models are selected when you start the app. Use **Ctrl+M** to open the model selection screen and choose which models you want to chat with.
+
+## Architecture
+
+The project is split into two main parts:
+
+### Library (`src/lib.rs`)
+
+The core library provides reusable components:
+- `client`: OpenRouter API client implementation with streaming support
+- `models`: Data structures for messages, models, and API responses (including streaming)
+- `chat`: Chat session management with streaming message delivery
+- `error`: Error types and handling
+
+### Binary (`src/main.rs`)
+
+The TUI application built with:
+- **Ratatui**: Terminal UI framework
+- **Crossterm**: Terminal manipulation
+- **Tokio**: Async runtime for API calls and streaming
+- **Futures**: Stream processing for real-time response handling
+
+This separation allows other UIs (web, GUI, etc.) to be built on top of the same core library.
+
+## Project Structure
+
+```
+tuister/
+├── src/
+│   ├── lib.rs          # Library entry point
+│   ├── main.rs         # TUI application
+│   ├── client.rs       # OpenRouter API client
+│   ├── models.rs       # Data models
+│   ├── chat.rs         # Chat session logic
+│   ├── error.rs        # Error types
+│   └── ui.rs           # TUI rendering
+├── Cargo.toml          # Dependencies
+└── README.md           # This file
+```
+
+## Technical Details
+
+### Streaming Responses
+
+Tuister uses Server-Sent Events (SSE) streaming from OpenRouter to deliver responses in real-time:
+
+- **Protocol**: HTTP streaming with `stream: true` parameter
+- **Format**: Server-Sent Events (SSE) with JSON chunks
+- **Benefits**:
+  - Faster perceived response time as text appears incrementally
+  - Lower latency for first token
+  - Better user experience with visual feedback
+- **Implementation**: Uses Tokio channels to pass chunks from the HTTP stream to the UI
+
+The streaming is handled automatically - responses appear as they're generated by the models.
+
+## Dependencies
+
+- **tokio**: Async runtime with full features
+- **reqwest**: HTTP client with streaming support
+- **serde**: Serialization/deserialization
+- **serde_json**: JSON parsing for API responses
+- **ratatui**: Terminal UI framework
+- **crossterm**: Terminal manipulation
+- **anyhow**: Error handling in main
+- **thiserror**: Error type definitions
+- **futures**: Stream processing utilities
+- **dotenvy**: .env file support for configuration
+
+## Future Enhancements
+
+- [x] Streaming responses
+- [x] Dynamic model discovery
+- [ ] Configuration file support
+- [ ] Chat history persistence
+- [ ] Multiple chat sessions
+- [ ] Syntax highlighting for code blocks
+- [ ] Additional UI implementations (web, desktop GUI)
+
+## License
+
+See [LICENSE](LICENSE) file for details.
