@@ -103,7 +103,7 @@ async fn main() -> Result<()> {
 
 fn get_fallback_models() -> Vec<tuister::Model> {
     use tuister::Model;
-    vec![
+    let mut models = vec![
         Model::new("openai/gpt-3.5-turbo", "GPT-3.5 Turbo"),
         Model::new("openai/gpt-4", "GPT-4"),
         Model::new("openai/gpt-4-turbo", "GPT-4 Turbo"),
@@ -114,7 +114,12 @@ fn get_fallback_models() -> Vec<tuister::Model> {
         Model::new("google/gemini-pro-1.5", "Gemini Pro 1.5"),
         Model::new("meta-llama/llama-3-70b-instruct", "Llama 3 70B"),
         Model::new("mistralai/mistral-7b-instruct", "Mistral 7B"),
-    ]
+    ];
+
+    // Sort models alphabetically by name
+    models.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+    models
 }
 
 async fn run_app<B: ratatui::backend::Backend>(

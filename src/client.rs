@@ -46,11 +46,14 @@ impl OpenRouterClient {
 
         let models_response: ModelsResponse = response.json().await?;
 
-        let models = models_response
+        let mut models: Vec<Model> = models_response
             .data
             .into_iter()
             .map(|model_info| Model::new(model_info.id, model_info.name))
             .collect();
+
+        // Sort models alphabetically by name
+        models.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
         Ok(models)
     }
