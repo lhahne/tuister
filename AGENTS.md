@@ -35,15 +35,15 @@ Tuister is split into a library and a binary to ensure core logic is reusable.
   - `ChatSession`: Manages conversation state and history.
   - `models`: Serialized data structures for API requests/responses.
   - `error`: Custom error types using `thiserror`.
-- **Binary (`src/main.rs`, `src/ui.rs`)**: The TUI application.
+- **Binary (`src/main.rs`, `src/ui/`)**: The TUI application.
   - `main.rs`: Entry point and main event loop.
-  - `ui.rs`: Rendering logic using `ratatui`.
+  - `ui/`: Rendering logic using `ratatui`.
 
 ## Code Style Guidelines
 
 ### 1. Formatting & Naming
 - Follow standard Rust naming conventions: `PascalCase` for types, `snake_case` for functions and variables.
-- Always run `cargo fmt` before committing.
+- Always run `cargo fmt` before submitting changes.
 - Prefer descriptive variable names over short abbreviations (e.g., `transmitter` instead of `tx` in public APIs, though `tx`/`rx` is acceptable for local channels).
 
 ### 2. Imports
@@ -64,6 +64,7 @@ Tuister is split into a library and a binary to ensure core logic is reusable.
 - **Binary**: Use `anyhow` for top-level error handling in `main.rs`.
 - Use the `?` operator for propagating errors.
 - Avoid `unwrap()` or `expect()` in library code unless it's genuinely unreachable or in tests.
+- In the binary, prefer `?` with context; allow `unwrap()` only for truly impossible states.
 
 ### 4. Async/Await
 - The project uses `tokio` as the async runtime.
@@ -89,7 +90,7 @@ Tuister is split into a library and a binary to ensure core logic is reusable.
 
 ## Development Workflow
 
-1.  **Exploration**: Use `grep` and `glob` to find relevant components.
+1.  **Exploration**: Use `rg` and `rg --files` to find relevant components.
 2.  **Implementation**: Follow the library-first approach. Implement logic in the library modules before updating the TUI.
 3.  **Verification**:
     - Run `cargo check` for fast feedback.
@@ -121,7 +122,7 @@ pub enum TuisterError {
 - Implements streaming via `send_message_streaming` which returns an `mpsc` receiver.
 
 ## Design Principles
-- **Separation of Concerns**: Keep TUI rendering logic (`ui.rs`) separate from business logic (`chat.rs`).
+- **Separation of Concerns**: Keep TUI rendering logic (`ui/`) separate from business logic (`chat.rs`).
 - **Streaming First**: Prioritize streaming implementations for better user experience.
 - **Robustness**: Handle API errors gracefully, providing fallbacks where possible (see `models.rs` for curated fallback models).
 - **Tool Support**: The project supports tool calling (function calling). Check `src/tools.rs` for implementation details.
