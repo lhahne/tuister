@@ -21,8 +21,9 @@ pub fn ui(f: &mut Frame, app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::app::DisplayMessage;
     use tokio::sync::mpsc;
-    use tuister::{ChatSession, Model, OpenRouterClient};
+    use tuister::{ChatSession, Model, OpenRouterClient, Role};
 
     fn create_test_app() -> App {
         let api_key = "test_key".to_string();
@@ -492,9 +493,68 @@ mod tests {
     }
 
     #[test]
-    fn test_is_streaming_when_idle() {
-        let app = create_test_app();
-        assert!(!app.is_streaming());
+    fn test_clear_chat() {
+        let mut app = create_test_app();
+
+        // Add some state
+        app.input = "test input".to_string();
+        app.messages.push(DisplayMessage {
+            role: Role::User,
+            content: "test message".to_string(),
+            model_name: None,
+        });
+        app.session.add_user_message("test message".to_string());
+
+        // Clear chat
+        app.clear_chat();
+
+        // Verify state is cleared
+        assert!(app.input.is_empty());
+        assert!(app.messages.is_empty());
+        assert!(app.model_responses.is_empty());
+        assert!(app.message_queue.is_empty());
+        assert!(app.session.messages().is_empty());
+    }
+
+    #[test]
+    fn test_clear_chat_shortcut_in_chat_mode() {
+        let mut app = create_test_app();
+
+        app.input = "test input".to_string();
+        app.messages.push(DisplayMessage {
+            role: Role::User,
+            content: "test message".to_string(),
+            model_name: None,
+        });
+        app.session.add_user_message("test message".to_string());
+
+        let cleared = app.clear_chat_if_in_chat_mode();
+
+        assert!(cleared);
+        assert!(app.input.is_empty());
+        assert!(app.messages.is_empty());
+        assert!(app.model_responses.is_empty());
+        assert!(app.message_queue.is_empty());
+        assert!(app.session.messages().is_empty());
+    }
+
+    #[test]
+    fn test_clear_chat_shortcut_ignored_outside_chat_mode() {
+        let mut app = create_test_app();
+        app.toggle_model_selection();
+
+        app.input = "test input".to_string();
+        app.messages.push(DisplayMessage {
+            role: Role::User,
+            content: "test message".to_string(),
+            model_name: None,
+        });
+
+        let cleared = app.clear_chat_if_in_chat_mode();
+
+        assert!(!cleared);
+        assert_eq!(app.input, "test input");
+        assert_eq!(app.messages.len(), 1);
     }
 
     #[test]

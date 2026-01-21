@@ -3,7 +3,7 @@ source: src/ui/mod.rs
 expression: terminal.backend()
 ---
 "┌Active Models─────────────────────────────────────────────────────────────────┐"
-"│[Model 1] [Model 2] [Model 3] (←→: focus panel | ↑↓: scroll | Tab: cycle | Esc│"
+"│[Model 1] [Model 2] [Model 3] (←→: focus panel | ↑↓: scroll | Tab: cycle | F2:│"
 "└──────────────────────────────────────────────────────────────────────────────┘"
 "┌► Model 1───────────────┐┌Model 2──────────────────┐┌Model 3─────────────────┐ "
 "│No messages yet         ││No messages yet          ││No messages yet         │ "

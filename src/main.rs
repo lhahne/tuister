@@ -222,6 +222,9 @@ async fn run_app<B: ratatui::backend::Backend>(
                     KeyCode::Tab => {
                         app.cycle_model_selection();
                     }
+                    KeyCode::F(2) => {
+                        app.clear_chat_if_in_chat_mode();
+                    }
                     KeyCode::Left => {
                         app.cycle_panel_focus_left();
                     }

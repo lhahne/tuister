@@ -586,6 +586,15 @@ impl App {
         // Clear session messages
         self.session.clear_messages();
     }
+
+    pub fn clear_chat_if_in_chat_mode(&mut self) -> bool {
+        if self.mode == AppMode::Chat {
+            self.clear_chat();
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[cfg(test)]

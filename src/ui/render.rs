@@ -136,7 +136,7 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
     }
 
     model_spans.push(Span::raw(
-        "(←→: focus panel | ↑↓: scroll | Tab: cycle | Esc: models)",
+        "(←→: focus panel | ↑↓: scroll | Tab: cycle | F2: clear | Esc: models)",
     ));
 
     let header = Paragraph::new(Line::from(model_spans)).block(
