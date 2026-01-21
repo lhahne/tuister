@@ -546,4 +546,52 @@ mod tests {
         terminal.draw(|f| ui(f, &app)).unwrap();
         insta::assert_snapshot!(terminal.backend());
     }
+
+    #[test]
+    fn test_error_message_displayed_in_messages() {
+        let mut app = create_test_app();
+
+        // Set up streaming with a channel we control
+        app.is_loading = true;
+        let (tx, rx) = mpsc::unbounded_channel::<String>();
+        app.streaming_receivers.push(("Model 1".to_string(), rx));
+        app.streaming_buffers
+            .insert("Model 1".to_string(), String::new());
+
+        // Send error message and close channel (simulates what chat.rs should do on error)
+        tx.send("[Error: Connection failed]".to_string()).unwrap();
+        drop(tx);
+
+        // Poll streaming to process the message
+        app.poll_streaming();
+
+        // Verify error appears in messages
+        assert_eq!(app.messages.len(), 1);
+        assert!(app.messages[0].content.contains("[Error"));
+        assert_eq!(app.messages[0].model_name, Some("Model 1".to_string()));
+    }
+
+    #[test]
+    fn test_error_message_with_partial_response() {
+        let mut app = create_test_app();
+
+        // Set up streaming with partial content already received
+        app.is_loading = true;
+        let (tx, rx) = mpsc::unbounded_channel::<String>();
+        app.streaming_receivers.push(("Model 1".to_string(), rx));
+        app.streaming_buffers
+            .insert("Model 1".to_string(), "Partial response...".to_string());
+
+        // Send error after partial response
+        tx.send("\n\n[Error: Connection lost]".to_string()).unwrap();
+        drop(tx);
+
+        // Poll streaming
+        app.poll_streaming();
+
+        // Verify both partial response and error are preserved
+        assert_eq!(app.messages.len(), 1);
+        assert!(app.messages[0].content.contains("Partial response"));
+        assert!(app.messages[0].content.contains("[Error"));
+    }
 }

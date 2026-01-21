@@ -35,8 +35,7 @@ impl OpenRouterClient {
     pub fn new(api_key: String) -> Result<Self> {
         let client = Client::builder()
             .use_rustls_tls()
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(60))
+            .connect_timeout(Duration::from_secs(30))
             .build()?;
         Ok(Self { client, api_key })
     }
@@ -73,13 +72,7 @@ impl OpenRouterClient {
         messages: &[ChatMessage],
         tx: mpsc::UnboundedSender<String>,
     ) -> Result<()> {
-        self.send_message_streaming_with_tools(
-            model_id,
-            messages.to_vec(),
-            tx,
-            0,
-            MAX_TOOL_CALLS,
-        )
+        self.send_message_streaming_with_tools(model_id, messages.to_vec(), tx, 0, MAX_TOOL_CALLS)
             .await
     }
 
@@ -312,5 +305,20 @@ mod tests {
         let api_key = "my_secret_key".to_string();
         let client = OpenRouterClient::new(api_key.clone()).unwrap();
         assert_eq!(client.api_key, api_key);
+    }
+
+    #[test]
+    fn test_client_creation_for_streaming() {
+        // This test documents that the client should have a connect timeout
+        // but NOT a request-level timeout that would kill streaming responses.
+        //
+        // The 60-second request timeout was removed because it applies to
+        // the entire streaming response, not individual chunks. For a model that
+        // takes 2+ minutes to generate a full response, this would incorrectly
+        // terminate the connection.
+        //
+        // We keep connect_timeout (30s) to fail fast on connection issues.
+        let client = OpenRouterClient::new("test_key".to_string());
+        assert!(client.is_ok(), "Client should be created successfully");
     }
 }

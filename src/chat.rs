@@ -56,9 +56,13 @@ impl ChatSession {
         let messages = self.messages.clone();
 
         tokio::spawn(async move {
-            let _ = client
-                .send_message_streaming(&model_id, &messages, tx)
-                .await;
+            if let Err(e) = client
+                .send_message_streaming(&model_id, &messages, tx.clone())
+                .await
+            {
+                // Send error message through the channel so it's displayed in the UI
+                let _ = tx.send(format!("[Error: {}]", e));
+            }
         });
 
         rx

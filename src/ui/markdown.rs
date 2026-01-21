@@ -147,18 +147,32 @@ pub fn parse_markdown(markdown: &str) -> Text<'_> {
             Event::Text(text) => {
                 let current_style = *style_stack.last().unwrap_or(&Style::default());
                 let content = text.to_string();
+
+                // Apply bold style to error messages (check for "Error:" pattern)
+                let style = if content.contains("Error:") {
+                    current_style.add_modifier(Modifier::BOLD)
+                } else {
+                    current_style
+                };
+
                 if content.contains('\n') {
                     let parts: Vec<&str> = content.split('\n').collect();
                     for (i, part) in parts.iter().enumerate() {
                         if !part.is_empty() {
-                            current_line.push(Span::styled(part.to_string(), current_style));
+                            // Check each part for error pattern
+                            let part_style = if part.contains("Error:") {
+                                current_style.add_modifier(Modifier::BOLD)
+                            } else {
+                                style
+                            };
+                            current_line.push(Span::styled(part.to_string(), part_style));
                         }
                         if i < parts.len() - 1 {
                             lines.push(Line::from(std::mem::take(&mut current_line)));
                         }
                     }
                 } else {
-                    current_line.push(Span::styled(content, current_style));
+                    current_line.push(Span::styled(content, style));
                 }
             }
             Event::Code(code) => {
@@ -271,5 +285,45 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_error_messages_are_bold() {
+        let text = parse_markdown("[Error: Something went wrong]");
+
+        // Error messages should be styled with BOLD modifier
+        // Note: markdown parser splits [text] into separate spans, so we check for "Error:"
+        assert!(
+            text.lines.iter().any(|line| {
+                line.spans.iter().any(|span| {
+                    span.content.contains("Error:")
+                        && span.style.add_modifier.contains(Modifier::BOLD)
+                })
+            }),
+            "Expected error messages to be styled as bold"
+        );
+    }
+
+    #[test]
+    fn test_error_in_mixed_content_is_bold() {
+        let text = parse_markdown("Normal text before\n\n[Error: Connection lost]\n\nMore text");
+
+        // Find the error span and check it's bold
+        // Note: markdown parser splits [text] into separate spans, so we check for "Error:"
+        let error_span = text
+            .lines
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .find(|s| s.content.contains("Error:"));
+
+        assert!(error_span.is_some(), "Should find error span");
+        assert!(
+            error_span
+                .unwrap()
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD),
+            "Error span should be bold"
+        );
     }
 }
