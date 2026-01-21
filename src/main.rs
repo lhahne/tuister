@@ -1,12 +1,13 @@
 mod ui;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
+use std::collections::HashSet;
 use std::io;
 use tuister::config::Config;
 use tuister::{ChatSession, OpenRouterClient};
@@ -24,24 +25,55 @@ async fn main() -> Result<()> {
     // Create client
     let client = OpenRouterClient::new(api_key.clone())?;
 
+    // Load saved config (for model selection persistence)
+    let config = Config::load();
+    let mut saved_model_ids = if config.selected_model_ids.is_empty() {
+        None
+    } else {
+        Some(config.selected_model_ids)
+    };
+
     // Fetch available models from OpenRouter API
+    let mut loaded_from_api = false;
     let available_models = match client.fetch_models().await {
-        Ok(models) => {
-            if models.is_empty() {
-                eprintln!("Warning: No models fetched from OpenRouter. Using fallback models.");
-                get_fallback_models()
-            } else {
-                models
-            }
+        Ok(models) if !models.is_empty() => {
+            loaded_from_api = true;
+            models
+        }
+        Ok(_) => {
+            eprintln!("Warning: No models fetched from OpenRouter. Using saved models.");
+            load_saved_models(&saved_model_ids)?
         }
         Err(e) => {
             eprintln!(
-                "Warning: Failed to fetch models from OpenRouter: {}. Using fallback models.",
+                "Warning: Failed to fetch models from OpenRouter: {}. Using saved models.",
                 e
             );
-            get_fallback_models()
+            load_saved_models(&saved_model_ids)?
         }
     };
+
+    if loaded_from_api {
+        if let Some(ids) = saved_model_ids.take() {
+            let original_len = ids.len();
+            let available_ids: HashSet<&str> =
+                available_models.iter().map(|m| m.id.as_str()).collect();
+            let filtered: Vec<String> = ids
+                .into_iter()
+                .filter(|id| available_ids.contains(id.as_str()))
+                .collect();
+            let needs_update = filtered.len() != original_len;
+
+            if needs_update {
+                let config = Config::with_selected_models(filtered.clone());
+                let _ = config.save();
+            }
+
+            if !filtered.is_empty() {
+                saved_model_ids = Some(filtered);
+            }
+        }
+    }
 
     // Setup terminal
     enable_raw_mode()?;
@@ -52,14 +84,6 @@ async fn main() -> Result<()> {
 
     // Create client for chat (reuse API key)
     let chat_client = OpenRouterClient::new(api_key)?;
-
-    // Load saved config (for model selection persistence)
-    let config = Config::load();
-    let saved_model_ids = if config.selected_model_ids.is_empty() {
-        None
-    } else {
-        Some(config.selected_model_ids)
-    };
 
     // Start with saved models or first 3 by default
     let default_models = if let Some(ref ids) = saved_model_ids {
@@ -97,25 +121,19 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn get_fallback_models() -> Vec<tuister::Model> {
-    use tuister::Model;
-    let mut models = vec![
-        Model::new("openai/gpt-3.5-turbo", "GPT-3.5 Turbo"),
-        Model::new("openai/gpt-4", "GPT-4"),
-        Model::new("openai/gpt-4-turbo", "GPT-4 Turbo"),
-        Model::new("anthropic/claude-3-haiku", "Claude 3 Haiku"),
-        Model::new("anthropic/claude-3-sonnet", "Claude 3 Sonnet"),
-        Model::new("anthropic/claude-3-opus", "Claude 3 Opus"),
-        Model::new("google/gemini-flash-1.5", "Gemini Flash 1.5"),
-        Model::new("google/gemini-pro-1.5", "Gemini Pro 1.5"),
-        Model::new("meta-llama/llama-3-70b-instruct", "Llama 3 70B"),
-        Model::new("mistralai/mistral-7b-instruct", "Mistral 7B"),
-    ];
+fn load_saved_models(saved_model_ids: &Option<Vec<String>>) -> Result<Vec<tuister::Model>> {
+    let Some(ids) = saved_model_ids else {
+        bail!("No models available from OpenRouter and no saved models found.");
+    };
 
-    // Sort models alphabetically by name
-    models.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    if ids.is_empty() {
+        bail!("No models available from OpenRouter and saved model list is empty.");
+    }
 
-    models
+    Ok(ids
+        .iter()
+        .map(|id| tuister::Model::new(id.clone(), id.clone()))
+        .collect())
 }
 
 async fn run_app<B: ratatui::backend::Backend>(
