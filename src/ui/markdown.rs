@@ -4,7 +4,63 @@ use ratatui::{
     text::{Line, Span, Text},
 };
 
+fn sanitize_terminal_text(input: &str) -> String {
+    enum State {
+        Normal,
+        Esc,
+        Csi,
+        Osc,
+        OscEsc,
+    }
+
+    let mut output = String::with_capacity(input.len());
+    let mut state = State::Normal;
+
+    for ch in input.chars() {
+        match state {
+            State::Normal => {
+                if ch == '\x1b' {
+                    state = State::Esc;
+                } else if ch.is_control() && ch != '\n' && ch != '\t' {
+                    continue;
+                } else {
+                    output.push(ch);
+                }
+            }
+            State::Esc => {
+                state = match ch {
+                    '[' => State::Csi,
+                    ']' => State::Osc,
+                    _ => State::Normal,
+                };
+            }
+            State::Csi => {
+                if ('@'..='~').contains(&ch) {
+                    state = State::Normal;
+                }
+            }
+            State::Osc => {
+                if ch == '\x07' {
+                    state = State::Normal;
+                } else if ch == '\x1b' {
+                    state = State::OscEsc;
+                }
+            }
+            State::OscEsc => {
+                if ch == '\\' {
+                    state = State::Normal;
+                } else if ch != '\x1b' {
+                    state = State::Osc;
+                }
+            }
+        }
+    }
+
+    output
+}
+
 pub fn parse_markdown(markdown: &str) -> Text<'_> {
+    let sanitized = sanitize_terminal_text(markdown);
     let mut lines = Vec::new();
     let mut current_line = Vec::new();
     let mut style_stack = Vec::new();
@@ -12,7 +68,7 @@ pub fn parse_markdown(markdown: &str) -> Text<'_> {
     // Default style
     style_stack.push(Style::default());
 
-    let parser = Parser::new(markdown);
+    let parser = Parser::new(&sanitized);
 
     for event in parser {
         match event {
@@ -135,6 +191,12 @@ mod tests {
         let text = parse_markdown("Hello world");
         assert_eq!(text.lines.len(), 2); // Text line + empty line after paragraph
         assert_eq!(text.lines[0].spans[0].content, "Hello world");
+    }
+
+    #[test]
+    fn test_sanitizes_ansi_sequences() {
+        let text = parse_markdown("\x1b[31mred\x1b[0m \x1b]0;title\x07ok");
+        assert_eq!(text.lines[0].spans[0].content, "red ok");
     }
 
     #[test]

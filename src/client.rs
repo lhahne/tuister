@@ -5,10 +5,15 @@ use futures::StreamExt;
 use reqwest::Client;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 const OPENROUTER_API_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_MODELS_URL: &str = "https://openrouter.ai/api/v1/models";
+const MAX_STREAM_BUFFER_BYTES: usize = 256 * 1024;
+const MAX_TOOL_ARGS_BYTES: usize = 64 * 1024;
+const MAX_TOOL_CALLS: usize = 16;
+const MAX_TOOL_CALL_DEPTH: usize = 4;
 
 #[derive(Debug, Serialize)]
 struct ChatRequest {
@@ -28,7 +33,11 @@ pub struct OpenRouterClient {
 
 impl OpenRouterClient {
     pub fn new(api_key: String) -> Result<Self> {
-        let client = Client::new();
+        let client = Client::builder()
+            .use_rustls_tls()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(60))
+            .build()?;
         Ok(Self { client, api_key })
     }
 
@@ -64,7 +73,13 @@ impl OpenRouterClient {
         messages: &[ChatMessage],
         tx: mpsc::UnboundedSender<String>,
     ) -> Result<()> {
-        self.send_message_streaming_with_tools(model_id, messages.to_vec(), tx)
+        self.send_message_streaming_with_tools(
+            model_id,
+            messages.to_vec(),
+            tx,
+            0,
+            MAX_TOOL_CALLS,
+        )
             .await
     }
 
@@ -74,7 +89,15 @@ impl OpenRouterClient {
         model_id: &str,
         mut messages: Vec<ChatMessage>,
         tx: mpsc::UnboundedSender<String>,
+        depth: usize,
+        tool_calls_remaining: usize,
     ) -> Result<()> {
+        if depth >= MAX_TOOL_CALL_DEPTH {
+            return Err(TuisterError::ApiError(
+                "Tool call depth limit exceeded".to_string(),
+            ));
+        }
+
         let request = ChatRequest {
             model: model_id.to_string(),
             messages: messages.clone(),
@@ -112,6 +135,11 @@ impl OpenRouterClient {
             let chunk = chunk?;
             let text = String::from_utf8_lossy(&chunk);
             buffer.push_str(&text);
+            if buffer.len() > MAX_STREAM_BUFFER_BYTES {
+                return Err(TuisterError::ApiError(
+                    "Streaming buffer exceeded limit".to_string(),
+                ));
+            }
 
             // Process complete lines
             while let Some(newline_pos) = buffer.find('\n') {
@@ -143,6 +171,13 @@ impl OpenRouterClient {
                             if let Some(tool_calls) = &choice.delta.tool_calls {
                                 for tc in tool_calls {
                                     let idx = tc.index;
+                                    if !tool_call_ids.contains_key(&idx)
+                                        && tool_call_ids.len() >= MAX_TOOL_CALLS
+                                    {
+                                        return Err(TuisterError::ApiError(
+                                            "Tool call limit exceeded".to_string(),
+                                        ));
+                                    }
                                     if let Some(id) = &tc.id {
                                         tool_call_ids.insert(idx, id.clone());
                                     }
@@ -151,7 +186,13 @@ impl OpenRouterClient {
                                             tool_call_names.insert(idx, name.clone());
                                         }
                                         if let Some(args) = &func.arguments {
-                                            tool_call_args.entry(idx).or_default().push_str(args);
+                                            let entry = tool_call_args.entry(idx).or_default();
+                                            if entry.len() + args.len() > MAX_TOOL_ARGS_BYTES {
+                                                return Err(TuisterError::ApiError(
+                                                    "Tool arguments exceeded limit".to_string(),
+                                                ));
+                                            }
+                                            entry.push_str(args);
                                         }
                                     }
                                 }
@@ -181,6 +222,11 @@ impl OpenRouterClient {
             }
 
             if !tool_calls.is_empty() {
+                if tool_calls.len() > tool_calls_remaining {
+                    return Err(TuisterError::ApiError(
+                        "Tool call limit exceeded".to_string(),
+                    ));
+                }
                 // Send info about tool usage to UI
                 for tc in &tool_calls {
                     let _ = tx.send(format!("\n[Using tool: {}]\n", tc.function.name));
@@ -197,8 +243,14 @@ impl OpenRouterClient {
                 }
 
                 // Continue the conversation with tool results
-                return Box::pin(self.send_message_streaming_with_tools(model_id, messages, tx))
-                    .await;
+                return Box::pin(self.send_message_streaming_with_tools(
+                    model_id,
+                    messages,
+                    tx,
+                    depth + 1,
+                    tool_calls_remaining - tool_calls.len(),
+                ))
+                .await;
             }
         }
 
