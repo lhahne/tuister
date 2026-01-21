@@ -42,7 +42,7 @@ pub fn render_chat_mode(f: &mut Frame, app: &App) {
 }
 
 /// Render the model selection mode UI
-pub fn render_model_selection_mode(f: &mut Frame, app: &App) {
+pub fn render_model_selection_mode(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -96,6 +96,9 @@ pub fn render_model_selection_mode(f: &mut Frame, app: &App) {
         )
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
+    let visible_height = chunks[1].height.saturating_sub(2) as usize;
+    app.set_model_list_height(visible_height);
+
     // Use ListState for scrolling
     let mut list_state = ListState::default();
     list_state.select(Some(app.selected_model_index));
@@ -104,8 +107,7 @@ pub fn render_model_selection_mode(f: &mut Frame, app: &App) {
     f.render_stateful_widget(list, chunks[1], &mut list_state);
 
     // Help text
-    let help_text =
-        "Esc: Back to chat | Space/Enter: Toggle | ↑↓/PgUp/PgDn: Navigate | Ctrl+C: Quit";
+    let help_text = "Esc: Back | Space/Enter: Toggle | ↑↓/PgUp/PgDn: Navigate | A-Z: Jump";
     let help = Paragraph::new(help_text)
         .style(Style::default())
         .block(Block::default().borders(Borders::ALL).title("Help"));

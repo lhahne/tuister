@@ -11,7 +11,7 @@ use ratatui::Frame;
 use render::{render_chat_mode, render_model_selection_mode};
 
 /// Main UI rendering function - dispatches to appropriate renderer based on app mode
-pub fn ui(f: &mut Frame, app: &App) {
+pub fn ui(f: &mut Frame, app: &mut App) {
     match app.mode {
         AppMode::Chat | AppMode::About => render_chat_mode(f, app),
         AppMode::ModelSelection => render_model_selection_mode(f, app),
@@ -32,6 +32,19 @@ mod tests {
             Model::new("model2", "Model 2"),
             Model::new("model3", "Model 3"),
         ];
+        let available_models = models.clone();
+        let session = ChatSession::new(client, models);
+        App::new(session, available_models, None)
+    }
+
+    fn create_test_app_with_model_names(names: &[&str]) -> App {
+        let api_key = "test_key".to_string();
+        let client = OpenRouterClient::new(api_key).unwrap();
+        let models: Vec<Model> = names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| Model::new(format!("model-{}", index), (*name).to_string()))
+            .collect();
         let available_models = models.clone();
         let session = ChatSession::new(client, models);
         App::new(session, available_models, None)
@@ -346,6 +359,7 @@ mod tests {
     fn test_model_list_offset_on_down() {
         let mut app = create_test_app();
         app.toggle_model_selection();
+        app.set_model_list_height(3);
 
         // With only 3 models, offset shouldn't change much
         assert_eq!(app.model_list_offset, 0);
@@ -359,8 +373,12 @@ mod tests {
 
     #[test]
     fn test_model_list_offset_on_up() {
-        let mut app = create_test_app();
+        let mut app = create_test_app_with_model_names(&[
+            "Alpha", "Beta", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel",
+            "India",
+        ]);
         app.toggle_model_selection();
+        app.set_model_list_height(5);
 
         // Set offset and selected index
         app.model_list_offset = 5;
@@ -370,6 +388,68 @@ mod tests {
         app.handle_up();
         assert_eq!(app.selected_model_index, 4);
         assert_eq!(app.model_list_offset, 4); // Offset follows selection
+    }
+
+    #[test]
+    fn test_model_list_offset_moves_with_selection() {
+        let mut app = create_test_app_with_model_names(&[
+            "Alpha", "Beta", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel",
+            "India",
+        ]);
+        app.toggle_model_selection();
+        app.set_model_list_height(5);
+
+        for _ in 0..7 {
+            app.handle_down();
+        }
+
+        assert_eq!(app.selected_model_index, 7);
+        assert_eq!(app.model_list_offset, 3);
+
+        app.handle_up();
+        assert_eq!(app.selected_model_index, 6);
+        assert_eq!(app.model_list_offset, 3);
+
+        app.handle_up();
+        assert_eq!(app.selected_model_index, 5);
+        assert_eq!(app.model_list_offset, 3);
+
+        app.handle_up();
+        assert_eq!(app.selected_model_index, 4);
+        assert_eq!(app.model_list_offset, 3);
+
+        app.handle_up();
+        assert_eq!(app.selected_model_index, 3);
+        assert_eq!(app.model_list_offset, 3);
+
+        app.handle_up();
+        assert_eq!(app.selected_model_index, 2);
+        assert_eq!(app.model_list_offset, 2);
+    }
+
+    #[test]
+    fn test_jump_to_next_model_starting_with_letter() {
+        let mut app = create_test_app_with_model_names(&[
+            "Alpha", "Beta", "Bravo", "Charlie", "Delta", "Echo",
+        ]);
+        app.toggle_model_selection();
+        app.set_model_list_height(3);
+
+        app.input_char('b');
+        assert_eq!(app.selected_model_index, 1);
+        assert_eq!(app.model_list_offset, 0);
+
+        app.input_char('b');
+        assert_eq!(app.selected_model_index, 2);
+        assert_eq!(app.model_list_offset, 0);
+
+        app.input_char('b');
+        assert_eq!(app.selected_model_index, 1);
+        assert_eq!(app.model_list_offset, 0);
+
+        app.input_char('d');
+        assert_eq!(app.selected_model_index, 4);
+        assert_eq!(app.model_list_offset, 2);
     }
 
     #[tokio::test]
@@ -408,6 +488,7 @@ mod tests {
         assert!(app.message_queue.is_empty());
         assert_eq!(app.spinner_frame, 0);
         assert_eq!(app.model_list_offset, 0);
+        assert_eq!(app.model_list_height, 0);
     }
 
     #[test]
@@ -501,9 +582,9 @@ mod tests {
 
     #[test]
     fn test_render_chat_mode_snapshot() {
-        let app = create_test_app();
+        let mut app = create_test_app();
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        terminal.draw(|f| ui(f, &app)).unwrap();
+        terminal.draw(|f| ui(f, &mut app)).unwrap();
         insta::assert_snapshot!(terminal.backend());
     }
 
@@ -512,7 +593,7 @@ mod tests {
         let mut app = create_test_app();
         app.toggle_model_selection();
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        terminal.draw(|f| ui(f, &app)).unwrap();
+        terminal.draw(|f| ui(f, &mut app)).unwrap();
         insta::assert_snapshot!(terminal.backend());
     }
 
@@ -521,7 +602,7 @@ mod tests {
         let mut app = create_test_app();
         app.input = "Hello, world!".to_string();
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        terminal.draw(|f| ui(f, &app)).unwrap();
+        terminal.draw(|f| ui(f, &mut app)).unwrap();
         insta::assert_snapshot!(terminal.backend());
     }
 
@@ -534,7 +615,7 @@ mod tests {
         let (_tx, rx) = mpsc::unbounded_channel::<String>();
         app.streaming_receivers.push(("Model 1".to_string(), rx));
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        terminal.draw(|f| ui(f, &app)).unwrap();
+        terminal.draw(|f| ui(f, &mut app)).unwrap();
         insta::assert_snapshot!(terminal.backend());
     }
 
@@ -543,7 +624,7 @@ mod tests {
         let mut app = create_test_app();
         app.toggle_about();
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        terminal.draw(|f| ui(f, &app)).unwrap();
+        terminal.draw(|f| ui(f, &mut app)).unwrap();
         insta::assert_snapshot!(terminal.backend());
     }
 

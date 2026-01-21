@@ -34,6 +34,7 @@ pub struct App {
     pub(crate) available_models: Vec<Model>,
     pub(crate) selected_model_index: usize,
     pub(crate) model_list_offset: usize,
+    pub(crate) model_list_height: usize,
     // Streaming state
     pub(crate) streaming_receivers: Vec<(String, mpsc::UnboundedReceiver<String>)>,
     pub(crate) streaming_buffers: HashMap<String, String>,
@@ -87,6 +88,7 @@ impl App {
             available_models,
             selected_model_index: 0,
             model_list_offset: 0,
+            model_list_height: 0,
             streaming_receivers: Vec::new(),
             streaming_buffers: HashMap::new(),
             message_queue: Vec::new(),
@@ -103,6 +105,7 @@ impl App {
             AppMode::Chat | AppMode::About => {
                 self.mode = AppMode::ModelSelection;
                 self.selected_model_index = 0;
+                self.model_list_offset = 0;
             }
             AppMode::ModelSelection => {
                 self.mode = AppMode::Chat;
@@ -140,10 +143,7 @@ impl App {
             AppMode::ModelSelection => {
                 if self.selected_model_index > 0 {
                     self.selected_model_index -= 1;
-                    // Adjust offset if selected item is above visible area
-                    if self.selected_model_index < self.model_list_offset {
-                        self.model_list_offset = self.selected_model_index;
-                    }
+                    self.update_model_list_offset();
                 }
             }
         }
@@ -155,12 +155,7 @@ impl App {
             AppMode::ModelSelection => {
                 if self.selected_model_index < self.available_models.len() - 1 {
                     self.selected_model_index += 1;
-                    // Adjust offset if selected item is below visible area
-                    // Assume visible height of ~15 items (will be adjusted by ListState if needed)
-                    let visible_height = 15;
-                    if self.selected_model_index >= self.model_list_offset + visible_height {
-                        self.model_list_offset = self.selected_model_index - visible_height + 1;
-                    }
+                    self.update_model_list_offset();
                 }
             }
         }
@@ -170,7 +165,7 @@ impl App {
         if self.mode == AppMode::ModelSelection {
             let page_size = 10;
             self.selected_model_index = self.selected_model_index.saturating_sub(page_size);
-            self.model_list_offset = self.model_list_offset.saturating_sub(page_size);
+            self.update_model_list_offset();
         }
     }
 
@@ -179,6 +174,7 @@ impl App {
             let page_size = 10;
             let max_index = self.available_models.len().saturating_sub(1);
             self.selected_model_index = (self.selected_model_index + page_size).min(max_index);
+            self.update_model_list_offset();
         }
     }
 
@@ -188,6 +184,60 @@ impl App {
             AppMode::ModelSelection => {
                 self.toggle_current_model();
             }
+        }
+    }
+
+    pub(crate) fn set_model_list_height(&mut self, height: usize) {
+        self.model_list_height = height;
+        self.update_model_list_offset();
+    }
+
+    fn jump_to_model_starting_with(&mut self, c: char) {
+        if self.mode != AppMode::ModelSelection || !c.is_alphabetic() {
+            return;
+        }
+
+        let total = self.available_models.len();
+        if total == 0 {
+            return;
+        }
+
+        let target = c.to_ascii_lowercase();
+        let start_index = self.selected_model_index + 1;
+
+        for offset in 0..total {
+            let index = (start_index + offset) % total;
+            let name = self.available_models[index].name.to_ascii_lowercase();
+            if name.starts_with(target) {
+                self.selected_model_index = index;
+                self.update_model_list_offset();
+                break;
+            }
+        }
+    }
+
+    fn update_model_list_offset(&mut self) {
+        if self.mode != AppMode::ModelSelection {
+            return;
+        }
+
+        let total = self.available_models.len();
+        if total == 0 {
+            self.model_list_offset = 0;
+            return;
+        }
+
+        let visible_height = self.model_list_height.max(1);
+        let max_offset = total.saturating_sub(visible_height);
+
+        if self.selected_model_index < self.model_list_offset {
+            self.model_list_offset = self.selected_model_index;
+        } else if self.selected_model_index >= self.model_list_offset + visible_height {
+            self.model_list_offset = self.selected_model_index + 1 - visible_height;
+        }
+
+        if self.model_list_offset > max_offset {
+            self.model_list_offset = max_offset;
         }
     }
 
@@ -236,8 +286,10 @@ impl App {
     }
 
     pub fn input_char(&mut self, c: char) {
-        if self.mode == AppMode::Chat {
-            self.input.push(c);
+        match self.mode {
+            AppMode::Chat => self.input.push(c),
+            AppMode::ModelSelection => self.jump_to_model_starting_with(c),
+            AppMode::About => {}
         }
     }
 
